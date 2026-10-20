@@ -1,23 +1,24 @@
-import { DatabaseSync } from "node:sqlite";
-import { createClient, type Client } from "@libsql/client";
-import fs from "node:fs";
-import path from "node:path";
 import { config } from "../config.js";
-import logger from "./logger.js";
+import { closeDatabase, executeSql, queryOne, queryRows } from "../db/client.js";
+import { runMigrations } from "./migrations.js";
 import type { ScoreLayer, ScoreResult } from "../types.js";
 
+/**
+ * 用户服务自己的评分记录（含最小索引字段：来源/标题/链接）。
+ * 注意：不包含新闻正文与翻译，正文只存在于爬虫服务的 news_items。
+ */
 export interface NewsScoreRow {
   id: number;
+  user_id: number;
   news_hash: string;
   source: string;
   title: string;
-  desc_text: string;
   url: string;
-  formatted_text: string;
   ai_score: number;
   ai_layer: string;
   ai_reason: string;
   ai_model: string;
+  prompt_hash: string;
   user_score: number | null;
   user_layer: string | null;
   user_reason: string | null;
@@ -29,26 +30,26 @@ export interface NewsScoreRow {
   updated_at: string;
 }
 
-export interface SaveAiScoreParams {
+export interface NewsIndexFields {
   newsHash: string;
   source?: string;
   title?: string;
-  desc?: string;
   url?: string;
-  formattedText: string;
+}
+
+export interface SaveAiScoreParams extends NewsIndexFields {
+  desc?: string;
+  formattedText?: string;
   aiScore: number;
   aiLayer: ScoreLayer;
   aiReason: string;
   aiModel?: string;
+  promptHash?: string;
 }
 
-export interface SaveUserManualScoreParams {
+export interface SaveUserManualScoreParams extends Partial<NewsIndexFields> {
   id?: number;
-  newsHash?: string;
-  source?: string;
-  title?: string;
   desc?: string;
-  url?: string;
   formattedText?: string;
   userScore?: number | null;
   userLayer?: ScoreLayer | null;
@@ -59,13 +60,9 @@ export interface SaveUserManualScoreParams {
   aiReason?: string;
 }
 
-export interface SaveNewsReadStatusParams {
+export interface SaveNewsReadStatusParams extends Partial<NewsIndexFields> {
   id?: number;
-  newsHash?: string;
-  source?: string;
-  title?: string;
   desc?: string;
-  url?: string;
   formattedText?: string;
   isRead?: boolean;
 }
@@ -91,188 +88,27 @@ export const inferLayerFromScore = (score: number): ScoreLayer => {
   return "L5";
 };
 
-let libsqlClient: Client | null = null;
-let localDbInstance: DatabaseSync | null = null;
 let initPromise: Promise<void> | null = null;
 
 /**
- * 初始化数据库连接（支持远程 sqld 与本地 node:sqlite）
+ * 初始化用户数据库：建立连接并执行迁移
  */
 export const initScoreDb = async (): Promise<void> => {
-  if (initPromise) {
-    return initPromise;
-  }
+  if (initPromise) return initPromise;
 
   initPromise = (async () => {
-    if (config.LIBSQL_URL) {
-      logger.info(`🌐 [Database] Connecting to remote sqld at ${config.LIBSQL_URL}...`);
-      libsqlClient = createClient({
-        url: config.LIBSQL_URL,
-        authToken: config.LIBSQL_AUTH_TOKEN || undefined,
-      });
-
-      // 初始化表结构与索引
-      await libsqlClient.execute(`
-        CREATE TABLE IF NOT EXISTS news_scores (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          news_hash TEXT NOT NULL UNIQUE,
-          source TEXT NOT NULL DEFAULT '',
-          title TEXT NOT NULL DEFAULT '',
-          desc_text TEXT NOT NULL DEFAULT '',
-          url TEXT NOT NULL DEFAULT '',
-          formatted_text TEXT NOT NULL,
-          ai_score INTEGER NOT NULL,
-          ai_layer TEXT NOT NULL DEFAULT 'Uncertain',
-          ai_reason TEXT NOT NULL DEFAULT '',
-          ai_model TEXT NOT NULL DEFAULT '',
-          user_score INTEGER DEFAULT NULL,
-          user_layer TEXT DEFAULT NULL,
-          user_reason TEXT DEFAULT NULL,
-          is_user_modified INTEGER NOT NULL DEFAULT 0,
-          user_updated_at TEXT DEFAULT NULL,
-          is_read INTEGER NOT NULL DEFAULT 0,
-          read_at TEXT DEFAULT NULL,
-          created_at TEXT NOT NULL,
-          updated_at TEXT NOT NULL
-        );
-      `);
-
-      await libsqlClient.execute(`CREATE INDEX IF NOT EXISTS idx_news_scores_user_modified ON news_scores(is_user_modified);`);
-      await libsqlClient.execute(`CREATE INDEX IF NOT EXISTS idx_news_scores_created_at ON news_scores(created_at DESC);`);
-      await libsqlClient.execute(`CREATE INDEX IF NOT EXISTS idx_news_scores_source ON news_scores(source);`);
-      await libsqlClient.execute(`CREATE INDEX IF NOT EXISTS idx_news_scores_is_read ON news_scores(is_read);`);
-
-      logger.info(`✅ [Database] Remote sqld database initialized successfully at ${config.LIBSQL_URL}`);
-    } else {
-      const dbPath = path.resolve(process.cwd(), config.SQLITE_DB_PATH || "./data/scores.sqlite");
-      const dbDir = path.dirname(dbPath);
-      if (!fs.existsSync(dbDir)) {
-        fs.mkdirSync(dbDir, { recursive: true });
-      }
-
-      const db = new DatabaseSync(dbPath);
-      db.exec(`
-        PRAGMA journal_mode = WAL;
-        PRAGMA synchronous = NORMAL;
-
-        CREATE TABLE IF NOT EXISTS news_scores (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          news_hash TEXT NOT NULL UNIQUE,
-          source TEXT NOT NULL DEFAULT '',
-          title TEXT NOT NULL DEFAULT '',
-          desc_text TEXT NOT NULL DEFAULT '',
-          url TEXT NOT NULL DEFAULT '',
-          formatted_text TEXT NOT NULL,
-          ai_score INTEGER NOT NULL,
-          ai_layer TEXT NOT NULL DEFAULT 'Uncertain',
-          ai_reason TEXT NOT NULL DEFAULT '',
-          ai_model TEXT NOT NULL DEFAULT '',
-          user_score INTEGER DEFAULT NULL,
-          user_layer TEXT DEFAULT NULL,
-          user_reason TEXT DEFAULT NULL,
-          is_user_modified INTEGER NOT NULL DEFAULT 0,
-          user_updated_at TEXT DEFAULT NULL,
-          is_read INTEGER NOT NULL DEFAULT 0,
-          read_at TEXT DEFAULT NULL,
-          created_at TEXT NOT NULL,
-          updated_at TEXT NOT NULL
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_news_scores_user_modified ON news_scores(is_user_modified);
-        CREATE INDEX IF NOT EXISTS idx_news_scores_created_at ON news_scores(created_at DESC);
-        CREATE INDEX IF NOT EXISTS idx_news_scores_source ON news_scores(source);
-        CREATE INDEX IF NOT EXISTS idx_news_scores_is_read ON news_scores(is_read);
-      `);
-
-      localDbInstance = db;
-      logger.info(`🗄️ [SQLite] Local database initialized at ${dbPath}`);
-    }
-  })();
+    await runMigrations();
+  })().catch((error) => {
+    initPromise = null;
+    throw error;
+  });
 
   return initPromise;
 };
 
-/**
- * 获取本地 SQLite 数据库实例（用于仅本地运行场景）
- */
-export const getScoreDb = (): DatabaseSync | Client => {
-  if (libsqlClient) {
-    return libsqlClient;
-  }
-  if (localDbInstance) {
-    return localDbInstance;
-  }
-  if (!config.LIBSQL_URL) {
-    const dbPath = path.resolve(process.cwd(), config.SQLITE_DB_PATH || "./data/scores.sqlite");
-    const dbDir = path.dirname(dbPath);
-    if (!fs.existsSync(dbDir)) {
-      fs.mkdirSync(dbDir, { recursive: true });
-    }
-    localDbInstance = new DatabaseSync(dbPath);
-    return localDbInstance;
-  }
-  // 如果配置了远程 sqld 但尚未完成 initScoreDb，立即初始化
-  initScoreDb().catch((err) => {
-    logger.error(`❌ [Database] Failed to initialize sqld client: ${err?.message}`);
-  });
-  return libsqlClient!;
-};
-
-/**
- * 确保数据库已初始化
- */
-const ensureDb = async (): Promise<void> => {
-  if (!libsqlClient && !localDbInstance) {
-    await initScoreDb();
-  }
-};
-
-/**
- * 统一执行查询并返回单条记录
- */
-const queryOne = async (sql: string, args: any[] = []): Promise<any | null> => {
-  await ensureDb();
-  if (libsqlClient) {
-    const res = await libsqlClient.execute({ sql, args });
-    if (!res.rows || res.rows.length === 0) return null;
-    return res.rows[0];
-  }
-  const db = localDbInstance!;
-  const stmt = db.prepare(sql);
-  const row = stmt.get(...args);
-  return row ?? null;
-};
-
-/**
- * 统一执行查询并返回多条记录
- */
-const queryRows = async (sql: string, args: any[] = []): Promise<any[]> => {
-  await ensureDb();
-  if (libsqlClient) {
-    const res = await libsqlClient.execute({ sql, args });
-    return res.rows ? [...res.rows] : [];
-  }
-  const db = localDbInstance!;
-  const stmt = db.prepare(sql);
-  const rows = stmt.all(...args);
-  return rows ?? [];
-};
-
-/**
- * 统一执行写入/更新语句
- */
-const executeSql = async (sql: string, args: any[] = []): Promise<void> => {
-  await ensureDb();
-  if (libsqlClient) {
-    await libsqlClient.execute({ sql, args });
-  } else {
-    const db = localDbInstance!;
-    if (args.length > 0) {
-      db.prepare(sql).run(...args);
-    } else {
-      db.exec(sql);
-    }
-  }
+export const closeScoreDb = async (): Promise<void> => {
+  await closeDatabase();
+  initPromise = null;
 };
 
 /**
@@ -281,17 +117,18 @@ const executeSql = async (sql: string, args: any[] = []): Promise<void> => {
 const mapDbRow = (row: any): NewsScoreRow => {
   return {
     id: Number(row.id),
+    user_id: Number(row.user_id ?? 0),
     news_hash: String(row.news_hash || ""),
     source: String(row.source || ""),
     title: String(row.title || ""),
-    desc_text: String(row.desc_text || ""),
     url: String(row.url || ""),
-    formatted_text: String(row.formatted_text || ""),
     ai_score: Number(row.ai_score ?? -1),
     ai_layer: String(row.ai_layer || "Uncertain"),
     ai_reason: String(row.ai_reason || ""),
     ai_model: String(row.ai_model || ""),
-    user_score: row.user_score !== null && row.user_score !== undefined ? Number(row.user_score) : null,
+    prompt_hash: String(row.prompt_hash || ""),
+    user_score:
+      row.user_score !== null && row.user_score !== undefined ? Number(row.user_score) : null,
     user_layer: row.user_layer ? String(row.user_layer) : null,
     user_reason: row.user_reason ? String(row.user_reason) : null,
     is_user_modified: Number(row.is_user_modified || 0),
@@ -305,7 +142,6 @@ const mapDbRow = (row: any): NewsScoreRow => {
 
 /**
  * 将数据库行转换为对外返回的 ScoreResult
- * 若用户手动修正过分数，则主字段 score / layer / reason 优先采用用户修正值，同时保留 aiScore 与 userScore
  */
 export const rowToScoreResult = (row: NewsScoreRow, fromCache: boolean): ScoreResult => {
   const isUserModified = Boolean(row.is_user_modified) && typeof row.user_score === "number";
@@ -349,18 +185,27 @@ export const rowToScoreResult = (row: NewsScoreRow, fromCache: boolean): ScoreRe
 };
 
 /**
- * 按 news_hash 查询评分记录
+ * 按 news_hash 查询当前用户的评分记录
  */
-export const getScoreRecordByHash = async (newsHash: string): Promise<NewsScoreRow | null> => {
+export const getScoreRecordByHash = async (
+  userId: number,
+  newsHash: string,
+): Promise<NewsScoreRow | null> => {
   if (!newsHash) return null;
-  const row = await queryOne("SELECT * FROM news_scores WHERE news_hash = ? LIMIT 1", [newsHash]);
+  const row = await queryOne(
+    `SELECT * FROM user_news_states WHERE user_id = ? AND news_hash = ? LIMIT 1`,
+    [userId, newsHash],
+  );
   return row ? mapDbRow(row) : null;
 };
 
 /**
- * 批量按 news_hash 检索评分记录（优化单次往返，大幅提升远程 sqld 批量缓存速查性能）
+ * 批量按 news_hash 检索当前用户的评分记录
  */
-export const getScoreRecordsByHashes = async (hashes: string[]): Promise<Map<string, NewsScoreRow>> => {
+export const getScoreRecordsByHashes = async (
+  userId: number,
+  hashes: string[],
+): Promise<Map<string, NewsScoreRow>> => {
   const result = new Map<string, NewsScoreRow>();
   const cleanHashes = [...new Set(hashes.filter(Boolean))];
   if (cleanHashes.length === 0) return result;
@@ -369,7 +214,10 @@ export const getScoreRecordsByHashes = async (hashes: string[]): Promise<Map<str
   for (let i = 0; i < cleanHashes.length; i += chunkSize) {
     const chunk = cleanHashes.slice(i, i + chunkSize);
     const placeholders = chunk.map(() => "?").join(",");
-    const rows = await queryRows(`SELECT * FROM news_scores WHERE news_hash IN (${placeholders})`, chunk);
+    const rows = await queryRows(
+      `SELECT * FROM user_news_states WHERE user_id = ? AND news_hash IN (${placeholders})`,
+      [userId, ...chunk],
+    );
     for (const r of rows) {
       const mapped = mapDbRow(r);
       result.set(mapped.news_hash, mapped);
@@ -380,65 +228,65 @@ export const getScoreRecordsByHashes = async (hashes: string[]): Promise<Map<str
 };
 
 /**
- * 按主键 ID 查询评分记录
+ * 按主键 ID 查询当前用户的评分记录（跨用户不可见）
  */
-export const getScoreRecordById = async (id: number): Promise<NewsScoreRow | null> => {
+export const getScoreRecordById = async (
+  userId: number,
+  id: number,
+): Promise<NewsScoreRow | null> => {
   if (!Number.isInteger(id) || id <= 0) return null;
-  const row = await queryOne("SELECT * FROM news_scores WHERE id = ? LIMIT 1", [id]);
+  const row = await queryOne(
+    `SELECT * FROM user_news_states WHERE user_id = ? AND id = ? LIMIT 1`,
+    [userId, id],
+  );
   return row ? mapDbRow(row) : null;
 };
 
 /**
- * 写入或更新 AI 评分记录（若已存在用户手动修正字段，则完整保留用户的修正数据）
+ * 写入或更新当前用户的 AI 评分记录（同时落一份最小索引字段）
  */
-export const saveAiScoreRecord = async (params: SaveAiScoreParams): Promise<NewsScoreRow> => {
+export const saveAiScoreRecord = async (
+  userId: number,
+  params: SaveAiScoreParams,
+): Promise<NewsScoreRow> => {
   const now = new Date().toISOString();
-  const source = (params.source || "").trim();
-  const title = (params.title || "").trim();
-  const desc = (params.desc || "").trim();
-  const url = (params.url || "").trim();
   const aiModel = (params.aiModel || config.DEEPSEEK_MODEL || "").trim();
 
   await executeSql(
     `
-    INSERT INTO news_scores (
-      news_hash, source, title, desc_text, url, formatted_text,
-      ai_score, ai_layer, ai_reason, ai_model,
+    INSERT INTO user_news_states (
+      user_id, news_hash, source, title, url,
+      ai_score, ai_layer, ai_reason, ai_model, prompt_hash,
       created_at, updated_at
-    ) VALUES (
-      ?, ?, ?, ?, ?, ?,
-      ?, ?, ?, ?,
-      ?, ?
-    )
-    ON CONFLICT(news_hash) DO UPDATE SET
-      source = CASE WHEN excluded.source != '' THEN excluded.source ELSE news_scores.source END,
-      title = CASE WHEN excluded.title != '' THEN excluded.title ELSE news_scores.title END,
-      desc_text = CASE WHEN excluded.desc_text != '' THEN excluded.desc_text ELSE news_scores.desc_text END,
-      url = CASE WHEN excluded.url != '' THEN excluded.url ELSE news_scores.url END,
-      formatted_text = excluded.formatted_text,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(user_id, news_hash) DO UPDATE SET
+      source = CASE WHEN excluded.source != '' THEN excluded.source ELSE user_news_states.source END,
+      title = CASE WHEN excluded.title != '' THEN excluded.title ELSE user_news_states.title END,
+      url = CASE WHEN excluded.url != '' THEN excluded.url ELSE user_news_states.url END,
       ai_score = excluded.ai_score,
       ai_layer = excluded.ai_layer,
       ai_reason = excluded.ai_reason,
       ai_model = excluded.ai_model,
+      prompt_hash = excluded.prompt_hash,
       updated_at = excluded.updated_at
     `,
     [
+      userId,
       params.newsHash,
-      source,
-      title,
-      desc,
-      url,
-      params.formattedText,
+      (params.source || "").trim(),
+      (params.title || "").trim(),
+      (params.url || "").trim(),
       params.aiScore,
       params.aiLayer,
       params.aiReason,
       aiModel,
+      params.promptHash || "",
       now,
       now,
     ],
   );
 
-  const saved = await getScoreRecordByHash(params.newsHash);
+  const saved = await getScoreRecordByHash(userId, params.newsHash);
   if (!saved) {
     throw new Error("Failed to read back saved AI score record from database");
   }
@@ -446,39 +294,47 @@ export const saveAiScoreRecord = async (params: SaveAiScoreParams): Promise<News
 };
 
 /**
- * 保存或重置用户手动修正的评分（供将来 AI 自动调整推荐逻辑使用）
+ * 保存或重置当前用户手动修正的评分
  */
-export const saveUserManualScore = async (params: SaveUserManualScoreParams): Promise<NewsScoreRow | null> => {
+export const saveUserManualScore = async (
+  userId: number,
+  params: SaveUserManualScoreParams,
+): Promise<NewsScoreRow | null> => {
   const now = new Date().toISOString();
 
-  // 1. 先尝试通过 id 或 newsHash 查找已有记录
   let existing: NewsScoreRow | null = null;
   if (typeof params.id === "number" && Number.isInteger(params.id) && params.id > 0) {
-    existing = await getScoreRecordById(params.id);
+    existing = await getScoreRecordById(userId, params.id);
   }
   if (!existing && params.newsHash) {
-    existing = await getScoreRecordByHash(params.newsHash);
+    existing = await getScoreRecordByHash(userId, params.newsHash);
   }
 
-  // 是否是撤销/重置手动打分
   const isReset = params.reset === true || params.userScore === null;
 
   if (existing) {
+    const source = (params.source || "").trim();
+    const title = (params.title || "").trim();
+    const url = (params.url || "").trim();
+
     if (isReset) {
       await executeSql(
         `
-        UPDATE news_scores
+        UPDATE user_news_states
         SET user_score = NULL,
             user_layer = NULL,
             user_reason = NULL,
             is_user_modified = 0,
             user_updated_at = NULL,
-            updated_at = ?
-        WHERE id = ?
+            updated_at = ?,
+            source = CASE WHEN ? != '' THEN ? ELSE source END,
+            title = CASE WHEN ? != '' THEN ? ELSE title END,
+            url = CASE WHEN ? != '' THEN ? ELSE url END
+        WHERE id = ? AND user_id = ?
         `,
-        [now, existing.id],
+        [now, source, source, title, title, url, url, existing.id, userId],
       );
-      return await getScoreRecordById(existing.id);
+      return await getScoreRecordById(userId, existing.id);
     }
 
     if (typeof params.userScore !== "number" || Number.isNaN(params.userScore)) {
@@ -491,18 +347,11 @@ export const saveUserManualScore = async (params: SaveUserManualScoreParams): Pr
         ? params.userLayer
         : inferLayerFromScore(clampedScore);
     const resolvedReason =
-      typeof params.userReason === "string"
-        ? params.userReason.trim()
-        : existing.user_reason;
-
-    const source = (params.source || "").trim();
-    const title = (params.title || "").trim();
-    const desc = (params.desc || "").trim();
-    const url = (params.url || "").trim();
+      typeof params.userReason === "string" ? params.userReason.trim() : existing.user_reason;
 
     await executeSql(
       `
-      UPDATE news_scores
+      UPDATE user_news_states
       SET user_score = ?,
           user_layer = ?,
           user_reason = ?,
@@ -511,9 +360,8 @@ export const saveUserManualScore = async (params: SaveUserManualScoreParams): Pr
           updated_at = ?,
           source = CASE WHEN ? != '' THEN ? ELSE source END,
           title = CASE WHEN ? != '' THEN ? ELSE title END,
-          desc_text = CASE WHEN ? != '' THEN ? ELSE desc_text END,
           url = CASE WHEN ? != '' THEN ? ELSE url END
-      WHERE id = ?
+      WHERE id = ? AND user_id = ?
       `,
       [
         clampedScore,
@@ -525,26 +373,19 @@ export const saveUserManualScore = async (params: SaveUserManualScoreParams): Pr
         source,
         title,
         title,
-        desc,
-        desc,
         url,
         url,
         existing.id,
+        userId,
       ],
     );
 
-    return await getScoreRecordById(existing.id);
+    return await getScoreRecordById(userId, existing.id);
   }
 
-  // 2. 若数据库中尚无该条记录，且不是 reset 操作，并且提供了有效新闻内容与 newsHash，则直接插入一条带用户修正的新记录
-  if (isReset) {
-    return null;
-  }
-
-  if (!params.newsHash || !params.formattedText) {
-    return null;
-  }
-
+  // 尚无记录：reset 无意义，直接返回
+  if (isReset) return null;
+  if (!params.newsHash) return null;
   if (typeof params.userScore !== "number" || Number.isNaN(params.userScore)) {
     throw new Error("请提供有效的修正分数 userScore（0~100 整数）");
   }
@@ -570,25 +411,32 @@ export const saveUserManualScore = async (params: SaveUserManualScoreParams): Pr
 
   await executeSql(
     `
-    INSERT INTO news_scores (
-      news_hash, source, title, desc_text, url, formatted_text,
-      ai_score, ai_layer, ai_reason, ai_model,
+    INSERT INTO user_news_states (
+      user_id, news_hash, source, title, url,
+      ai_score, ai_layer, ai_reason, ai_model, prompt_hash,
       user_score, user_layer, user_reason, is_user_modified, user_updated_at,
       created_at, updated_at
-    ) VALUES (
-      ?, ?, ?, ?, ?, ?,
-      ?, ?, ?, ?,
-      ?, ?, ?, 1, ?,
-      ?, ?
-    )
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, 1, ?, ?, ?)
+    ON CONFLICT(user_id, news_hash) DO UPDATE SET
+      user_score = excluded.user_score,
+      user_layer = excluded.user_layer,
+      user_reason = excluded.user_reason,
+      is_user_modified = 1,
+      user_updated_at = excluded.user_updated_at,
+      updated_at = excluded.updated_at,
+      source = CASE WHEN excluded.source != '' THEN excluded.source ELSE user_news_states.source END,
+      title = CASE WHEN excluded.title != '' THEN excluded.title ELSE user_news_states.title END,
+      url = CASE WHEN excluded.url != '' THEN excluded.url ELSE user_news_states.url END,
+      ai_score = CASE WHEN user_news_states.ai_score < 0 THEN excluded.ai_score ELSE user_news_states.ai_score END,
+      ai_layer = CASE WHEN user_news_states.ai_score < 0 THEN excluded.ai_layer ELSE user_news_states.ai_layer END,
+      ai_reason = CASE WHEN user_news_states.ai_score < 0 THEN excluded.ai_reason ELSE user_news_states.ai_reason END
     `,
     [
+      userId,
       params.newsHash,
       (params.source || "").trim(),
       (params.title || "").trim(),
-      (params.desc || "").trim(),
       (params.url || "").trim(),
-      params.formattedText,
       initialAiScore,
       initialAiLayer,
       initialAiReason,
@@ -602,13 +450,16 @@ export const saveUserManualScore = async (params: SaveUserManualScoreParams): Pr
     ],
   );
 
-  return await getScoreRecordByHash(params.newsHash);
+  return await getScoreRecordByHash(userId, params.newsHash);
 };
 
 /**
- * 保存或更新单条新闻的已读状态（支持评分完成前先落库已读状态，后续 AI 评分不会覆盖 is_read）
+ * 保存或更新当前用户单条新闻的已读状态
  */
-export const saveNewsReadStatus = async (params: SaveNewsReadStatusParams): Promise<NewsScoreRow | null> => {
+export const saveNewsReadStatus = async (
+  userId: number,
+  params: SaveNewsReadStatusParams,
+): Promise<NewsScoreRow | null> => {
   const now = new Date().toISOString();
   const isRead = params.isRead !== undefined ? Boolean(params.isRead) : true;
   const isReadVal = isRead ? 1 : 0;
@@ -616,29 +467,27 @@ export const saveNewsReadStatus = async (params: SaveNewsReadStatusParams): Prom
 
   let existing: NewsScoreRow | null = null;
   if (typeof params.id === "number" && Number.isInteger(params.id) && params.id > 0) {
-    existing = await getScoreRecordById(params.id);
+    existing = await getScoreRecordById(userId, params.id);
   }
   if (!existing && params.newsHash) {
-    existing = await getScoreRecordByHash(params.newsHash);
+    existing = await getScoreRecordByHash(userId, params.newsHash);
   }
 
   if (existing) {
     const source = (params.source || "").trim();
     const title = (params.title || "").trim();
-    const desc = (params.desc || "").trim();
     const url = (params.url || "").trim();
 
     await executeSql(
       `
-      UPDATE news_scores
+      UPDATE user_news_states
       SET is_read = ?,
           read_at = CASE WHEN ? = 1 THEN COALESCE(read_at, ?) ELSE NULL END,
           updated_at = ?,
           source = CASE WHEN ? != '' THEN ? ELSE source END,
           title = CASE WHEN ? != '' THEN ? ELSE title END,
-          desc_text = CASE WHEN ? != '' THEN ? ELSE desc_text END,
           url = CASE WHEN ? != '' THEN ? ELSE url END
-      WHERE id = ?
+      WHERE id = ? AND user_id = ?
       `,
       [
         isReadVal,
@@ -649,43 +498,41 @@ export const saveNewsReadStatus = async (params: SaveNewsReadStatusParams): Prom
         source,
         title,
         title,
-        desc,
-        desc,
         url,
         url,
         existing.id,
+        userId,
       ],
     );
 
-    return await getScoreRecordById(existing.id);
+    return await getScoreRecordById(userId, existing.id);
   }
 
-  // 若数据库中尚无该条记录，且传入了有效的 newsHash 与 formattedText，则预先插入一条占位记录（ai_score = -1 表示尚未完成 AI 评分）
-  if (!params.newsHash || !params.formattedText) {
-    return null;
-  }
+  if (!params.newsHash) return null;
 
   await executeSql(
     `
-    INSERT INTO news_scores (
-      news_hash, source, title, desc_text, url, formatted_text,
-      ai_score, ai_layer, ai_reason, ai_model,
-      is_read, read_at,
-      created_at, updated_at
-    ) VALUES (
-      ?, ?, ?, ?, ?, ?,
-      -1, 'Uncertain', '', '',
-      ?, ?,
-      ?, ?
-    )
+    INSERT INTO user_news_states (
+      user_id, news_hash, source, title, url,
+      ai_score, ai_layer, ai_reason, ai_model, prompt_hash,
+      is_read, read_at, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, -1, 'Uncertain', '', '', '', ?, ?, ?, ?)
+    ON CONFLICT(user_id, news_hash) DO UPDATE SET
+      is_read = excluded.is_read,
+      read_at = CASE WHEN excluded.is_read = 1
+                    THEN COALESCE(user_news_states.read_at, excluded.read_at)
+                    ELSE NULL END,
+      updated_at = excluded.updated_at,
+      source = CASE WHEN excluded.source != '' THEN excluded.source ELSE user_news_states.source END,
+      title = CASE WHEN excluded.title != '' THEN excluded.title ELSE user_news_states.title END,
+      url = CASE WHEN excluded.url != '' THEN excluded.url ELSE user_news_states.url END
     `,
     [
+      userId,
       params.newsHash,
       (params.source || "").trim(),
       (params.title || "").trim(),
-      (params.desc || "").trim(),
       (params.url || "").trim(),
-      params.formattedText,
       isReadVal,
       readAtVal,
       now,
@@ -693,34 +540,35 @@ export const saveNewsReadStatus = async (params: SaveNewsReadStatusParams): Prom
     ],
   );
 
-  return await getScoreRecordByHash(params.newsHash);
+  return await getScoreRecordByHash(userId, params.newsHash);
 };
 
 /**
- * 获取所有已读新闻的 newsHash 列表（供前端初始化同步跨端已读状态）
+ * 获取当前用户所有已读新闻的 newsHash 列表
  */
-export const getAllReadNewsHashes = async (limit = 5000): Promise<string[]> => {
+export const getAllReadNewsHashes = async (userId: number, limit = 5000): Promise<string[]> => {
   const safeLimit = Math.max(1, Math.min(limit, 20000));
   const rows = await queryRows(
     `
-    SELECT news_hash FROM news_scores
-    WHERE is_read = 1
+    SELECT news_hash FROM user_news_states
+    WHERE user_id = ? AND is_read = 1
     ORDER BY COALESCE(read_at, updated_at) DESC
     LIMIT ?
     `,
-    [safeLimit],
+    [userId, safeLimit],
   );
   return rows.map((r: any) => String(r.news_hash)).filter(Boolean);
 };
 
 /**
- * 查询数据库中的新闻评分记录列表（支持只筛选用户手动修正过或已读的记录，供 AI 自动调优读取）
+ * 查询当前用户的评分记录列表
  */
 export const queryScoreRecords = async (
+  userId: number,
   params: QueryScoreRecordsParams = {},
 ): Promise<{ total: number; items: NewsScoreRow[] }> => {
-  const conditions: string[] = [];
-  const bindValues: Array<string | number> = [];
+  const conditions: string[] = ["user_id = ?"];
+  const bindValues: Array<string | number> = [userId];
 
   if (params.onlyUserModified) {
     conditions.push("is_user_modified = 1");
@@ -734,16 +582,19 @@ export const queryScoreRecords = async (
     bindValues.push(params.source.trim());
   }
 
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  const whereClause = `WHERE ${conditions.join(" AND ")}`;
   const limit = Math.max(1, Math.min(params.limit || 100, 500));
   const offset = Math.max(0, params.offset || 0);
 
-  const countRow = await queryOne(`SELECT COUNT(*) as total FROM news_scores ${whereClause}`, bindValues);
+  const countRow = await queryOne(
+    `SELECT COUNT(*) AS total FROM user_news_states ${whereClause}`,
+    bindValues,
+  );
   const total = Number(countRow?.total ?? 0);
 
   const rows = await queryRows(
     `
-    SELECT * FROM news_scores
+    SELECT * FROM user_news_states
     ${whereClause}
     ORDER BY CASE WHEN is_user_modified = 1 THEN user_updated_at ELSE updated_at END DESC, id DESC
     LIMIT ? OFFSET ?
@@ -751,6 +602,5 @@ export const queryScoreRecords = async (
     [...bindValues, limit, offset],
   );
 
-  const items = rows.map((r: any) => mapDbRow(r));
-  return { total, items };
+  return { total, items: rows.map((r: any) => mapDbRow(r)) };
 };

@@ -113,9 +113,10 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onBeforeUnmount } from "vue";
+import { computed, onActivated, onBeforeUnmount, onMounted, watch } from "vue";
 import { useRouter } from "vue-router";
 import { mainStore } from "@/store";
+import { useAuthStore } from "@/store/auth";
 
 import StreamHeader from "@/components/Stream/StreamHeader.vue";
 import StreamSourceNav from "@/components/Stream/StreamSourceNav.vue";
@@ -145,6 +146,7 @@ const {
   setArticleItemRef,
   getArticleItemRefSetter,
   loadReadHashesFromBackend,
+  resetReadState,
 } = useStreamReadStatus({
   onReadStatusChange: (uniqueKey, isRead) => {
     if (scoreMap[uniqueKey]) {
@@ -195,7 +197,40 @@ const {
   },
 });
 
-// 4. 汇总并排序新闻列表：
+// 4. 登录态与 Prompt 变化：清空本地评分/已读并复用已加载信源重新评分
+const authStore = useAuthStore();
+let lastScoredUserId = authStore.userId;
+let lastAppliedPromptHash = authStore.promptHash;
+
+watch(
+  () => authStore.userId,
+  async (userId) => {
+    if (userId === lastScoredUserId) return;
+    lastScoredUserId = userId;
+    lastAppliedPromptHash = authStore.promptHash;
+
+    resetScoreQueue(true);
+    resetReadState();
+
+    if (userId) {
+      await loadReadHashesFromBackend();
+      loadAllSourcesSequentially(false);
+    }
+  }
+);
+
+watch(
+  () => authStore.promptHash,
+  (hash) => {
+    if (!authStore.isAuthed || !hash || hash === lastAppliedPromptHash) return;
+    lastAppliedPromptHash = hash;
+    // 旧评分已失效，复用已加载的信源数据重新入队评分
+    resetScoreQueue(true);
+    loadAllSourcesSequentially(false);
+  }
+);
+
+// 5. 汇总并排序新闻列表：
 // 1) 已打分按分数降序排列（同分按原顺序排列）
 // 2) 未打分排在已打分之后，严格保持原顺序
 const allArticles = computed(() => {
@@ -373,6 +408,14 @@ onMounted(() => {
   initReadObserver();
   loadReadHashesFromBackend();
   loadAllSourcesSequentially(false);
+});
+
+// App.vue 使用 keep-alive 缓存页面，从账户页返回时 onMounted 不会重跑
+onActivated(() => {
+  if (authStore.isAuthed && Object.keys(scoreMap).length === 0) {
+    loadReadHashesFromBackend();
+    loadAllSourcesSequentially(false);
+  }
 });
 
 onBeforeUnmount(() => {

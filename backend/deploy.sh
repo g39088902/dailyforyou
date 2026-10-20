@@ -14,22 +14,24 @@ handle_error() {
     exit 1
 }
 
-# 开始拉去代码
+# 部署单个服务：安装依赖 → 构建 → 重启 PM2
+deploy_service() {
+    local dir="$1"
+    local app="$2"
+
+    log "开始部署 ${dir} (${app})..."
+    (cd "$dir" && npm install) || handle_error "${dir} 依赖安装失败"
+    (cd "$dir" && npm run build) || handle_error "${dir} 构建失败"
+
+    pm2 restart "$app" || (cd "$dir" && pm2 start ecosystem.config.cjs) || handle_error "${app} 启动失败"
+}
+
+# 拉取代码（仓库根目录）
 log "开始拉取代码..."
-git pull
-# 开始部署
-log "开始部署..."
+git -C .. pull || handle_error "git pull 失败"
 
-# 安装依赖
-log "正在安装依赖..."
-npm install || handle_error "npm install 失败"
-
-# 构建项目
-log "正在构建项目..."
-npm run build || handle_error "构建失败"
-
-# 使用 pm2 重启或启动项目
-log "正在启动/重启服务..."
-pm2 restart daily-news || pm2 start ecosystem.config.cjs || handle_error "PM2 启动失败"
+# 两个后端服务独立部署，任一失败不影响已有进程
+deploy_service "$(pwd)" "dailyhot-back"
+deploy_service "../crawler" "dailyhot-crawler"
 
 log "部署完成!"

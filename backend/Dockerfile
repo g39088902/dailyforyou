@@ -1,4 +1,4 @@
-FROM node:20-alpine AS base
+FROM node:22-alpine AS base
 
 ENV NODE_ENV=docker
 
@@ -13,7 +13,6 @@ WORKDIR /app
 
 COPY package*json tsconfig.json pnpm-lock.yaml .env.example ./
 COPY src ./src
-COPY public ./public
 
 # 复制环境变量
 RUN [ ! -e ".env" ] && cp .env.example .env || true
@@ -30,22 +29,21 @@ FROM base AS runner
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 hono
 
-# 创建日志目录
-RUN mkdir -p /app/logs && chown -R hono:nodejs /app/logs
+# 创建日志与数据目录
+RUN mkdir -p /app/logs /app/data && chown -R hono:nodejs /app/logs /app/data
 RUN ln -s /app/logs /logs
 
 # 复制文件
 COPY --from=builder --chown=hono:nodejs /app/node_modules /app/node_modules
 COPY --from=builder --chown=hono:nodejs /app/dist /app/dist
-COPY --from=builder /app/public /app/public
 COPY --from=builder /app/.env /app/.env
 COPY --from=builder /app/package.json /app/package.json
 
 # 切换用户
 USER hono
 
-# 暴露端口
-EXPOSE 6688
+# 暴露端口（用户服务）
+EXPOSE 6690
 
 # 运行
 CMD ["node", "/app/dist/index.js"]

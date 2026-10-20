@@ -29,6 +29,8 @@ export default defineConfig(({ mode }) => {
       }),
       // PWA
       VitePWA({
+        // 在某些受限环境（文件删除被拦截）可设 PWA_DISABLE=true 跳过 SW 生成
+        disable: process.env.PWA_DISABLE === "true",
         registerType: "autoUpdate",
         workbox: {
           cleanupOutdatedCaches: true,

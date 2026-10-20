@@ -31,6 +31,15 @@ const routes = [
     },
     component: () => import("@/views/Setting.vue"),
   },
+  // 账户与自定义 Prompt
+  {
+    path: "/account",
+    name: "account",
+    meta: {
+      title: "账户与 Prompt",
+    },
+    component: () => import("@/views/Account.vue"),
+  },
   // 测试页面
   {
     path: "/test",

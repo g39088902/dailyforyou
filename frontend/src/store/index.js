@@ -208,6 +208,8 @@ export const mainStore = defineStore("mainData", {
       hideReadNews: false,
       // 本地持久化的已读新闻标识集合（存 uniqueKey / newsHash）
       readNewsKeys: [],
+      // 已读集合归属的用户 ID（切换账号时清空，避免跨账号串读）
+      readNewsKeysOwner: null,
     };
   },
   getters: {},
@@ -282,6 +284,7 @@ export const mainStore = defineStore("mainData", {
         "listFontSize",
         "hideReadNews",
         "readNewsKeys",
+        "readNewsKeysOwner",
       ],
     },
   ],

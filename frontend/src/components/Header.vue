@@ -69,6 +69,7 @@
             </template>
             全局设置
           </n-popover>
+          <AccountEntry />
         </n-space>
       </div>
       <div class="mobile">
@@ -100,6 +101,7 @@ import {
   ViewList,
 } from "@icon-park/vue-next";
 import StreamClock from "@/components/Stream/StreamClock.vue";
+import AccountEntry from "@/components/Auth/AccountEntry.vue";
 import { getCurrentTime } from "@/utils/getTime.js";
 import { mainStore } from "@/store";
 import { NText, NIcon } from "naive-ui";
@@ -177,6 +179,15 @@ const menuOptions = [
       });
     },
   },
+  {
+    label: "账户与 Prompt",
+    key: "account",
+    icon: () => {
+      return h(NIcon, null, {
+        default: () => h(ViewList),
+      });
+    },
+  },
 ];
 
 // 移动端下拉菜单点击事件
@@ -189,6 +200,8 @@ const menuOptionsSelect = (val) => {
     router.push("/");
   } else if (val === "setting") {
     router.push("/setting");
+  } else if (val === "account") {
+    router.push("/account");
   }
 };
 

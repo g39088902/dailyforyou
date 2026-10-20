@@ -1,15 +1,18 @@
 version: "3.8"
 
 services:
-  DailyhotApi:
+  DailyForYouUser:
     build:
       context: .
       target: runner
     ports:
-      - "6688:6688"
+      - "6690:6690"
     volumes:
       - "./logs:/app/logs"
+      - "./data:/app/data"
     environment:
-      - PORT=6688
+      - PORT=6690
+      - AUTH_JWT_SECRET=${AUTH_JWT_SECRET:-}
+      - DEFAULT_USER_ADDRESS=${DEFAULT_USER_ADDRESS:-}
     user: "114514"
     restart: always

@@ -1,5 +1,9 @@
 import axios from "@/api/request";
 
+// 榜单抓取由独立的爬虫服务承载；未单独配置时回退到默认 API 地址
+const FEED_BASE_URL =
+  import.meta.env.VITE_FEED_API || import.meta.env.VITE_GLOBAL_API;
+
 /**
  * 获取热榜分类数据
  * @param {string} type 热榜分类名称
@@ -22,6 +26,7 @@ export const getHotLists = (type, isNew = false, params) => {
   return axios({
     method: "GET",
     url: `/${path}`,
+    baseURL: FEED_BASE_URL,
     params: {
       cache: !isNew,
       ...params,

@@ -14,9 +14,7 @@ import {
   type NewsScoreRow,
 } from "./scoreDb.js";
 import type { ScoreLayer, ScoreResult } from "../types.js";
-import { SCORE_PROMPT } from "./scorePrompt.js";
-
-export { SCORE_PROMPT };
+import { buildScoreMessages } from "./scorePrompt.js";
 
 export interface ScoreInputItem {
   id?: string | number;
@@ -32,9 +30,16 @@ export interface ScoreInputItem {
   [key: string]: unknown;
 }
 
+/**
+ * 一次评分运行所需的用户上下文（prompt 与指纹由路由层统一解析，避免逐条查库）
+ */
+export interface ScoreRunContext {
+  userId: number;
+  promptText: string;
+  promptHash: string;
+}
+
 export interface ScoreOptions {
-  cacheTtl?: number;
-  noCache?: boolean;
   forceRescore?: boolean;
   concurrency?: number;
 }
@@ -42,7 +47,7 @@ export interface ScoreOptions {
 const VALID_LAYERS = new Set<ScoreLayer>(["L1", "L2", "L3", "L4", "L5", "Uncertain"]);
 
 /**
- * 计算规范化新闻文本的唯一哈希（用于 SQLite 唯一索引与缓存键）
+ * 计算规范化新闻文本的唯一哈希（用于唯一索引与缓存键）
  */
 export const hashNewsText = (text: string): string => {
   return crypto.createHash("md5").update(text).digest("hex");
@@ -156,19 +161,49 @@ export const formatNewsInput = (item: string | ScoreInputItem): string => {
   return extractNewsMetadata(item).formattedText;
 };
 
+const pickScoreValue = (obj: any): number | null => {  for (const key of ["score", "Score", "评分", "分数"]) {
+    const value = obj?.[key];
+    if (typeof value === "number" && !Number.isNaN(value)) return value;
+    if (typeof value === "string" && value.trim() !== "" && !Number.isNaN(Number(value))) {
+      return Number(value);
+    }
+  }
+  return null;
+};
+
+const pickLayerValue = (obj: any): ScoreLayer | null => {
+  for (const key of ["layer", "Layer", "层级", "等级"]) {
+    const value = obj?.[key];
+    if (typeof value === "string" && VALID_LAYERS.has(value.trim() as ScoreLayer)) {
+      return value.trim() as ScoreLayer;
+    }
+  }
+  return null;
+};
+
+const pickReasonValue = (obj: any): string => {
+  for (const key of ["reason", "Reason", "理由", "依据", "说明"]) {
+    const value = obj?.[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+};
+
 /**
- * 解析模型返回的 JSON 字符串并校验字段
+ * 解析模型返回内容，四级降级：
+ * 1. 去代码围栏 + 截取首尾大括号后 JSON.parse
+ * 2. 宽松字段名（score/评分/分数、layer/层级、reason/理由）
+ * 3. 仅含数字时取首个 0~100 数字，层级按分数推断，标记 degraded
+ * 4. 全部失败返回 null（调用方决定不写库）
  */
-const parseScoreResponse = (rawContent: string): ScoreResult | null => {
-  let content = rawContent.trim();
+export const parseScoreResponse = (rawContent: string): ScoreResult | null => {
+  let content = (rawContent || "").trim();
   if (!content) return null;
 
-  // 去除可能的 markdown 代码块包装
   if (content.startsWith("```")) {
     content = content.replace(/^```[a-zA-Z]*\n?/, "").replace(/\n?```$/, "").trim();
   }
 
-  // 若前后仍有额外字符，尝试提取第一个 JSON 对象
   const firstBrace = content.indexOf("{");
   const lastBrace = content.lastIndexOf("}");
   if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
@@ -177,33 +212,104 @@ const parseScoreResponse = (rawContent: string): ScoreResult | null => {
 
   try {
     const parsed = JSON.parse(content);
-    const rawScore = Number(parsed?.score);
-    if (Number.isNaN(rawScore)) {
+    const rawScore = pickScoreValue(parsed);
+    if (rawScore === null) {
       return null;
     }
-
     const score = Math.max(0, Math.min(100, Math.round(rawScore)));
-    const rawLayer = typeof parsed?.layer === "string" ? (parsed.layer.trim() as ScoreLayer) : "Uncertain";
-    const layer: ScoreLayer = VALID_LAYERS.has(rawLayer) ? rawLayer : "Uncertain";
-    const reason = typeof parsed?.reason === "string" ? parsed.reason.trim() : "";
-
+    // 用户可自定义输出格式：层级缺失时按分数推断，避免写入 Uncertain 造成排序失真
+    const layer = pickLayerValue(parsed) ?? inferScoreLayer(score);
     return {
       score,
       layer,
-      reason,
+      reason: pickReasonValue(parsed),
     };
   } catch {
-    return null;
+    // 继续降级
   }
+
+  const numberMatch = content.match(/\b(\d{1,3})\b/);
+  if (numberMatch) {
+    const parsedNumber = Number(numberMatch[1]);
+    if (!Number.isNaN(parsedNumber) && parsedNumber >= 0 && parsedNumber <= 100) {
+      const score = Math.round(parsedNumber);
+      logger.warn(
+        `⚠️ [Scorer] 模型输出无法解析为 JSON，已按纯数字降级：score=${score} raw=${content.slice(0, 80)}`,
+      );
+      return {
+        score,
+        layer: inferScoreLayer(score),
+        reason: "模型未返回结构化理由",
+        degraded: true,
+      };
+    }
+  }
+
+  return null;
+};
+
+const inferScoreLayer = (score: number): ScoreLayer => {
+  if (score >= 90) return "L1";
+  if (score >= 75) return "L2";
+  if (score >= 60) return "L4";
+  if (score >= 40) return "Uncertain";
+  return "L5";
+};
+
+export interface ScoreCompletionResult {
+  raw: string;
+  parsed: ScoreResult | null;
+  latencyMs: number;
+  model: string;
+}
+
+/**
+ * 调用 DeepSeek 完成一次评分（供正常评分与 Prompt 试跑复用）
+ */
+export const requestScoreCompletion = async (
+  systemPrompt: string,
+  formattedText: string,
+  options: { timeout?: number } = {},
+): Promise<ScoreCompletionResult> => {
+  const apiKey = config.DEEPSEEK_API_KEY;
+  if (!apiKey) {
+    throw new Error("DEEPSEEK_API_KEY is not configured");
+  }
+
+  const startedAt = Date.now();
+  const response = await axios.post(
+    `${config.DEEPSEEK_BASE_URL.replace(/\/+$/, "")}/chat/completions`,
+    {
+      model: config.DEEPSEEK_MODEL,
+      messages: buildScoreMessages(systemPrompt, formattedText),
+      temperature: 0.1,
+    },
+    {
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      timeout: options.timeout ?? 45000,
+    },
+  );
+
+  const raw = response?.data?.choices?.[0]?.message?.content || "";
+  return {
+    raw,
+    parsed: parseScoreResponse(raw),
+    latencyMs: Date.now() - startedAt,
+    model: config.DEEPSEEK_MODEL,
+  };
 };
 
 /**
  * 对单条新闻进行喜好度预测打分：
- * 1. 先检查 SQLite 数据库是否已有该条新闻的打分记录（若有则直接返回，不再请求 AI）
- * 2. 若无缓存（或显式指定 forceRescore），请求 DeepSeek AI 打分并将结果持久化存入 SQLite
+ * 1. 先查当前用户在数据库中是否有「同一 prompt 指纹」或「手动修正」记录，命中直接返回
+ * 2. 未命中则用该用户的 prompt 请求 DeepSeek，并把结果持久化
  */
 export const scoreNewsItem = async (
   input: string | ScoreInputItem,
+  ctx: ScoreRunContext,
   options: ScoreOptions = {},
 ): Promise<ScoreResult> => {
   const { forceRescore = false } = options;
@@ -219,11 +325,14 @@ export const scoreNewsItem = async (
     };
   }
 
-  // 1. 优先查询持久化数据库缓存（若仅有已读占位记录 ai_score = -1 且未手动打分，则仍需继续调用 AI 打分）
   if (!forceRescore) {
     try {
-      const dbRecord = await getScoreRecordByHash(newsHash);
-      if (dbRecord && (dbRecord.ai_score >= 0 || Boolean(dbRecord.is_user_modified))) {
+      const dbRecord = await getScoreRecordByHash(ctx.userId, newsHash);
+      const usable =
+        dbRecord &&
+        ((dbRecord.ai_score >= 0 && dbRecord.prompt_hash === ctx.promptHash) ||
+          Boolean(dbRecord.is_user_modified));
+      if (usable && dbRecord) {
         return rowToScoreResult(dbRecord, true);
       }
     } catch (dbErr) {
@@ -233,45 +342,18 @@ export const scoreNewsItem = async (
     }
   }
 
-  // 2. 数据库无缓存，请求 AI 进行评分
-  const apiKey = config.DEEPSEEK_API_KEY;
-  if (!apiKey) {
-    logger.warn("⚠️ [Scorer] DEEPSEEK_API_KEY is not configured.");
-    throw new Error("DEEPSEEK_API_KEY is not configured");
-  }
-
-  const response = await axios.post(
-    `${config.DEEPSEEK_BASE_URL.replace(/\/+$/, "")}/chat/completions`,
-    {
-      model: config.DEEPSEEK_MODEL,
-      messages: [
-        {
-          role: "user",
-          content: `${SCORE_PROMPT}\n${formattedText}`,
-        },
-      ],
-      temperature: 0.1,
-    },
-    {
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      timeout: 45000,
-    },
-  );
-
-  const rawContent = response?.data?.choices?.[0]?.message?.content || "";
-  const parsed = parseScoreResponse(rawContent);
+  const completion = await requestScoreCompletion(ctx.promptText, formattedText);
+  const parsed = completion.parsed;
 
   if (!parsed) {
-    logger.error(`❌ [Scorer] Failed to parse DeepSeek score response as JSON: ${rawContent}`);
+    logger.error(
+      `❌ [Scorer] 解析失败 user=${ctx.userId} prompt=${ctx.promptHash.slice(0, 8)} raw=${completion.raw.slice(0, 120)}`,
+    );
     throw new Error("Failed to parse model response as valid score JSON");
   }
 
-  // 3. 将 AI 打分结果持久化写入数据库
   try {
-    const savedRow = await saveAiScoreRecord({
+    const savedRow = await saveAiScoreRecord(ctx.userId, {
       newsHash,
       source: meta.source,
       title: meta.title,
@@ -281,17 +363,18 @@ export const scoreNewsItem = async (
       aiScore: parsed.score,
       aiLayer: parsed.layer,
       aiReason: parsed.reason,
-      aiModel: config.DEEPSEEK_MODEL,
+      aiModel: completion.model,
+      promptHash: ctx.promptHash,
     });
 
     logger.info(
-      `🎯 [Scorer] Scored & saved to database (${parsed.score} | ${parsed.layer}): ${formattedText.slice(0, 40)}...`,
+      `🎯 [Scorer] 已评分并入库 user=${ctx.userId} (${parsed.score} | ${parsed.layer}): ${formattedText.slice(0, 40)}...`,
     );
 
     return rowToScoreResult(savedRow, false);
-  } catch (dbSaveErr) {
+  } catch (saveError) {
     logger.error(
-      `❌ [Scorer] Failed to save score to database: ${dbSaveErr instanceof Error ? dbSaveErr.message : "Unknown error"}`,
+      `❌ [Scorer] 评分入库失败 user=${ctx.userId}: ${saveError instanceof Error ? saveError.message : "Unknown error"}`,
     );
     return {
       ...parsed,
@@ -326,7 +409,10 @@ export interface ManualScoreInput extends ScoreInputItem {
 /**
  * 接收用户手动修正单条新闻分数的逻辑封装
  */
-export const updateManualScoreItem = async (payload: ManualScoreInput): Promise<ScoreResult> => {
+export const updateManualScoreItem = async (
+  userId: number,
+  payload: ManualScoreInput,
+): Promise<ScoreResult> => {
   const meta = extractNewsMetadata(payload);
   const recordId =
     typeof payload.recordId === "number"
@@ -375,7 +461,7 @@ export const updateManualScoreItem = async (payload: ManualScoreInput): Promise<
     aiReason: typeof payload.aiReason === "string" ? payload.aiReason : undefined,
   };
 
-  const updatedRow = await saveUserManualScore(saveParams);
+  const updatedRow = await saveUserManualScore(userId, saveParams);
   if (!updatedRow) {
     throw new Error(
       "未找到对应的新闻评分记录，请提供有效的 id / newsHash，或提供完整的新闻内容（如 title、desc、source）以创建记录",
@@ -383,7 +469,7 @@ export const updateManualScoreItem = async (payload: ManualScoreInput): Promise<
   }
 
   logger.info(
-    `✏️ [Scorer] User manually updated score (id=${updatedRow.id}, ai=${updatedRow.ai_score} -> user=${updatedRow.user_score}): ${updatedRow.title || updatedRow.formatted_text.slice(0, 40)}`,
+    `✏️ [Scorer] 用户手动修正 user=${userId} (id=${updatedRow.id}, ai=${updatedRow.ai_score} -> user=${updatedRow.user_score}): ${updatedRow.title || updatedRow.news_hash}`,
   );
 
   return rowToScoreResult(updatedRow, true);
@@ -396,9 +482,12 @@ export interface ReadStatusInput extends ScoreInputItem {
 }
 
 /**
- * 标记或更新单条新闻的已读状态
+ * 标记或更新当前用户单条新闻的已读状态
  */
-export const updateNewsReadStatusItem = async (payload: ReadStatusInput): Promise<ScoreResult> => {
+export const updateNewsReadStatusItem = async (
+  userId: number,
+  payload: ReadStatusInput,
+): Promise<ScoreResult> => {
   const meta = extractNewsMetadata(payload);
   const recordId =
     typeof payload.recordId === "number"
@@ -425,7 +514,7 @@ export const updateNewsReadStatusItem = async (payload: ReadStatusInput): Promis
     isRead: payload.isRead !== undefined ? Boolean(payload.isRead) : true,
   };
 
-  const updatedRow = await saveNewsReadStatus(saveParams);
+  const updatedRow = await saveNewsReadStatus(userId, saveParams);
   if (!updatedRow) {
     throw new Error(
       "未找到对应的新闻记录，请提供有效的 id / newsHash，或提供完整的新闻内容（如 title、desc、source）以记录已读状态",
@@ -440,6 +529,7 @@ export const updateNewsReadStatusItem = async (payload: ReadStatusInput): Promis
  */
 export const scoreNewsBatch = async <T extends string | ScoreInputItem>(
   items: T[],
+  ctx: ScoreRunContext,
   options: ScoreOptions = {},
 ): Promise<Array<(T extends string ? { text: string } : T) & ScoreResult>> => {
   if (!items || items.length === 0) {
@@ -455,7 +545,7 @@ export const scoreNewsBatch = async <T extends string | ScoreInputItem>(
       const idx = currentIndex++;
       const item = items[idx];
       try {
-        const scoreRes = await scoreNewsItem(item, options);
+        const scoreRes = await scoreNewsItem(item, ctx, options);
         if (typeof item === "string") {
           results[idx] = {
             text: item,
@@ -505,10 +595,13 @@ export interface CachedLookupResult extends Partial<ScoreResult> {
 }
 
 /**
- * 批量仅查询数据库本地/远程缓存评分（不触发 AI 远程调用，利用批量哈希查询单次往返完成）
+ * 批量仅查询当前用户的缓存评分（不触发 AI 调用）
+ * 命中条件：同一 prompt 指纹下已完成 AI 评分，或用户手动修正过
  */
 export const lookupCachedScoresBatch = async (
+  userId: number,
   items: Array<string | ScoreInputItem>,
+  promptHash: string,
 ): Promise<CachedLookupResult[]> => {
   if (!Array.isArray(items) || items.length === 0) {
     return [];
@@ -519,7 +612,7 @@ export const lookupCachedScoresBatch = async (
 
   let recordsMap = new Map<string, NewsScoreRow>();
   try {
-    recordsMap = await getScoreRecordsByHashes(hashes);
+    recordsMap = await getScoreRecordsByHashes(userId, hashes);
   } catch (err) {
     logger.warn(
       `⚠️ [Scorer] Batch cache lookup error: ${err instanceof Error ? err.message : "Unknown error"}`,
@@ -545,7 +638,8 @@ export const lookupCachedScoresBatch = async (
       };
     }
 
-    if (dbRecord.ai_score >= 0 || Boolean(dbRecord.is_user_modified)) {
+    const promptMatched = dbRecord.ai_score >= 0 && dbRecord.prompt_hash === promptHash;
+    if (promptMatched || Boolean(dbRecord.is_user_modified)) {
       return {
         ...rowToScoreResult(dbRecord, true),
         newsHash,
@@ -554,7 +648,7 @@ export const lookupCachedScoresBatch = async (
       };
     }
 
-    // 仅有已读占位记录（ai_score = -1），尚未完成 AI 评分
+    // 仅有已读占位记录（ai_score = -1）或 prompt 已变更，均视为未命中
     return {
       newsHash,
       hit: false,
@@ -562,4 +656,3 @@ export const lookupCachedScoresBatch = async (
     };
   });
 };
-

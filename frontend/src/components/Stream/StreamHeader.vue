@@ -27,6 +27,9 @@
           信源加载 ({{ loadedSourcesCount }}/{{ sourceCount }})
         </n-tag>
         <n-tag v-else round type="success" size="small">信源加载完成</n-tag>
+        <n-tag v-if="!authStore.isAuthed" round type="warning" size="small">
+          登录后启用 AI 评分
+        </n-tag>
         <n-tag v-if="isScoring" round type="warning" size="small">
           AI 评分中 ({{ scoredNewsCount }}/{{ totalNewsCount }} · 并发 {{ activeScoreWorkers }}/{{ maxScoreConcurrency }})
         </n-tag>
@@ -76,6 +79,7 @@
           </template>
           全局设置
         </n-popover>
+        <AccountEntry />
       </n-space>
     </div>
   </div>
@@ -85,10 +89,13 @@
 import { useRouter } from "vue-router";
 import { Refresh, SunOne, Moon, SettingTwo } from "@icon-park/vue-next";
 import StreamClock from "@/components/Stream/StreamClock.vue";
+import AccountEntry from "@/components/Auth/AccountEntry.vue";
 import { mainStore } from "@/store";
+import { useAuthStore } from "@/store/auth";
 
 const router = useRouter();
 const store = mainStore();
+const authStore = useAuthStore();
 
 defineProps({
   sourceCount: {

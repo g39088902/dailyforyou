@@ -30,7 +30,9 @@ DailyForYou 回答的是另一个问题：**「现在什么值得我读？」**
 
 > 热度是公共的，优先级是私人的。
 
-没有账号，没有云端画像。评分和已读都存在你自己的数据库里。
+没有算法替你决定「什么重要」。评分规则由你自己写，存在你自己的库里。
+
+账号用钱包登录（MetaMask 签名，不发起链上交易、不消耗 Gas），评分、已读与 Prompt 全部按账号隔离；微信扫码与手机号登录已预留接入位。
 
 ## 它和热榜聚合器，不是一个东西
 
@@ -94,27 +96,38 @@ AI 之后重算，也**不会覆盖你的判断**。改得越多，这条流越�
 
 一个刻意的细节：本次刚读的内容不会立刻消失，要等下次刷新才沉底——列表不会在鼠标底下跳动。
 
-## 两步启动
+## 三步启动
 
-终端 1 · 后端（`:6688`）：
+项目由三个平级目录组成：`crawler/`（抓取 + 翻译 + 入库）、`backend/`（用户、评分、Prompt）、`frontend/`。
+
+终端 1 · 爬虫服务（`:6688`）：
+
+```bash
+cd crawler
+pnpm install
+cp .env.example .env      # 填入 DEEPSEEK_API_KEY 与数据库配置
+pnpm dev
+```
+
+终端 2 · 用户服务（`:6690`）：
 
 ```bash
 cd backend
 pnpm install
-cp .env.example .env      # 填入 DEEPSEEK_API_KEY
+cp .env.example .env      # 与爬虫指向同一个数据库，另需 AUTH_JWT_SECRET
 pnpm dev
 ```
 
-终端 2 · 在项目根目录新开一个终端，启动前端（`:6699`）：
+终端 3 · 前端（`:6699`）：
 
 ```bash
 cd frontend
 pnpm install
-cp .env.example .env      # 默认指向本地 6688
+cp .env.example .env      # 默认：榜单→6688，账户/评分→6690
 pnpm dev
 ```
 
-打开 `http://localhost:6699` 即可。需要 **Node.js ≥ 22.5**；没有 DeepSeek Key 也能浏览信源，只是拿不到评分。
+打开 `http://localhost:6699` 即可。需要 **Node.js ≥ 22.5**；没有 DeepSeek Key 也能浏览信源，只是拿不到评分与翻译。
 
 ## 信源矩阵
 
@@ -133,16 +146,16 @@ pnpm dev
 
 这是整个项目最值得动手的地方。
 
-1. 打开 `backend/src/utils/scorePrompt.ts`
-2. 重写「用户画像」——写清你的职业、技术栈、正在做的事、会为什么停下来
-3. 按你的偏好调整五层锚点：什么该进 L1，什么必须压到 L5
-4. 重启后端，新内容立即按新标准打分
+1. 用钱包登录，打开 `/account`
+2. 直接编辑你的评分 Prompt——画像、五层锚点、输出格式都可以改
+3. 点「试跑一次」确认模型能按你的格式返回，再保存
+4. 保存后旧评分自动失效，下次浏览按新标准重打；你手动改过的分数会保留
 
-改动只影响之后的新内容，历史评分仍会复用。
+想改所有新用户的默认值，编辑 `backend/src/utils/scorePrompt.ts`。
 
 ## 部署
 
-需要自托管？完整步骤见 [DEPLOYMENT.md](./DEPLOYMENT.md)。
+需要自托管？完整步骤见 [DEPLOYMENT.md](./DEPLOYMENT.md)，其中包含「爬虫与用户服务分机部署」的拓扑、Nginx 与环境变量说明。
 
 ## Roadmap
 
@@ -160,7 +173,7 @@ pnpm dev
 
 ## License
 
-[MIT](./backend/LICENSE) © DailyForYou Contributors
+[MIT](./LICENSE) © DailyForYou Contributors
 
 ---
 

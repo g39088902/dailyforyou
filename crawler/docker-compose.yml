@@ -1,0 +1,17 @@
+version: "3.8"
+
+services:
+  DailyForYouCrawler:
+    build:
+      context: .
+      target: runner
+    ports:
+      - "6688:6688"
+    volumes:
+      - "./logs:/app/logs"
+      - "./data:/app/data"
+    environment:
+      - PORT=6688
+      - NEWS_PERSIST_ENABLED=true
+    user: "114514"
+    restart: always

@@ -1,8 +1,5 @@
-import { fileURLToPath } from "url";
 import { config } from "./config.js";
 import { Hono } from "hono";
-import getRSS from "./utils/getRSS.js";
-import { deduplicateArticles } from "./utils/deduplicate.js";
 import {
   scoreNewsItem,
   scoreNewsBatch,
@@ -12,7 +9,12 @@ import {
   updateManualScoreItem,
   updateNewsReadStatusItem,
 } from "./utils/scorer.js";
-import type { ScoreInputItem, ManualScoreInput, ReadStatusInput } from "./utils/scorer.js";
+import type {
+  ScoreInputItem,
+  ManualScoreInput,
+  ReadStatusInput,
+  ScoreRunContext,
+} from "./utils/scorer.js";
 import {
   getScoreRecordByHash,
   getScoreRecordById,
@@ -20,112 +22,54 @@ import {
   getAllReadNewsHashes,
   rowToScoreResult,
 } from "./utils/scoreDb.js";
+import { getPromptContext } from "./utils/promptDb.js";
+import { consumeRateLimit } from "./utils/rateLimit.js";
+import { requireAuth, type AuthEnv } from "./auth/middleware.js";
+import { authRouter } from "./auth/index.js";
+import { accountRouter } from "./api/account.js";
 import logger from "./utils/logger.js";
-import path from "path";
-import fs from "fs";
 
-const app = new Hono();
+const app = new Hono<AuthEnv>();
 
-// 模拟 __dirname
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+/** 从鉴权中间件注入的上下文读取当前用户 */
+const getAuthUser = (c: any): { userId: number } => c.get("authUser") as { userId: number };
 
-// 路由数据
-let allRoutePath: Array<string> = [];
-const routersDirName: string = "routes";
-
-// 排除路由
-const excludeRoutes: Array<string> = [];
-
-// 建立完整目录路径
-const routersDirPath = path.join(__dirname, routersDirName);
-
-// 递归查找函数
-const findTsFiles = (dirPath: string, allFiles: string[] = [], basePath: string = ""): string[] => {
-  // 读取目录下的所有文件和文件夹
-  const items: Array<string> = fs.readdirSync(dirPath);
-  // 遍历每个文件或文件夹
-  items.forEach((item) => {
-    const fullPath: string = path.join(dirPath, item);
-    const relativePath: string = basePath ? path.posix.join(basePath, item) : item;
-    const stat: fs.Stats = fs.statSync(fullPath);
-    if (stat.isDirectory()) {
-      // 如果是文件夹，递归查找
-      findTsFiles(fullPath, allFiles, relativePath);
-    } else if (
-      stat.isFile() &&
-      (item.endsWith(".ts") || item.endsWith(".js")) &&
-      !item.endsWith(".d.ts")
-    ) {
-      // 符合条件
-      allFiles.push(relativePath.replace(/\.(ts|js)$/, ""));
-    }
-  });
-  return allFiles;
+/** 组装评分上下文：用户 ID + 该用户当前的 Prompt 与指纹 */
+const buildScoreContext = async (c: any): Promise<ScoreRunContext> => {
+  const { userId } = getAuthUser(c);
+  const prompt = await getPromptContext(userId);
+  return { userId, promptText: prompt.prompt, promptHash: prompt.promptHash };
 };
 
-// 获取全部路由
-if (fs.existsSync(routersDirPath) && fs.statSync(routersDirPath).isDirectory()) {
-  allRoutePath = findTsFiles(routersDirPath);
-} else {
-  console.error(`📂 The directory ${routersDirPath} does not exist or is not a directory`);
-}
+/** 评分接口的按用户限流（缓存查询不计入，仅约束评分主链路） */
+const scoreRateGuard = (c: any, userId: number) => {
+  const result = consumeRateLimit(`score:${userId}`, config.SCORE_RATE_LIMIT_PER_MIN);
+  if (result.allowed) return null;
+  return c.json(
+    {
+      code: 429,
+      message: "评分请求过于频繁，请稍后再试",
+      retryAfter: result.retryAfterSeconds,
+    },
+    429,
+  );
+};
 
-// 注册全部路由
-for (let index = 0; index < allRoutePath.length; index++) {
-  const router = allRoutePath[index];
-  // 是否处于排除名单
-  if (excludeRoutes.includes(router)) {
-    continue;
-  }
-  const listApp = app.basePath(`/${router}`);
-  // 返回榜单
-  listApp.get("/", async (c) => {
-    // 是否采用缓存
-    const noCache = c.req.query("cache") === "false";
-    // 限制显示条目
-    const limit = c.req.query("limit");
-    // 是否输出 RSS
-    const rssEnabled = c.req.query("rss") === "true";
-    // 获取路由路径
-    const { handleRoute } = await import(`./routes/${router}.js`);
-    const listData = await handleRoute(c, noCache);
-    // 限制单信源最多只返回 30 条（如果传了更小的 limit 则以更小的为准）
-    const maxLimit = limit ? Math.min(parseInt(limit, 10), 30) : 30;
-    if (Array.isArray(listData?.data)) {
-      // 构造当前路由及子分类唯一标识（忽略 cache / limit / rss 等控制参数）
-      const rawQueries = c.req.query();
-      const subQuery = Object.keys(rawQueries)
-        .filter((k) => !["cache", "limit", "rss"].includes(k) && rawQueries[k] !== undefined)
-        .sort()
-        .map((k) => `${k}=${rawQueries[k]}`)
-        .join("&");
-      const routeKey = subQuery ? `${router}?${subQuery}` : router;
+// ⚠️ 顺序敏感：必须在下方所有 /score 路由注册之前（Hono 的中间件只对之后注册的路由生效）
+app.use("/score", requireAuth);
+app.use("/score/*", requireAuth);
 
-      listData.data = deduplicateArticles(listData.data, routeKey, {
-        noCache,
-        maxItems: maxLimit,
-      });
-      listData.total = listData.data.length;
-    }
-    // 是否输出 RSS
-    if (rssEnabled || config.RSS_MODE) {
-      const rss = getRSS(listData);
-      if (typeof rss === "string") {
-        c.header("Content-Type", "application/xml; charset=utf-8");
-        return c.body(rss);
-      } else {
-        return c.json({ code: 500, message: "RSS generation failed" }, 500);
-      }
-    }
-    return c.json({ code: 200, ...listData });
-  });
-  // 请求方式错误
-  listApp.all("*", (c) => c.json({ code: 405, message: "Method Not Allowed" }, 405));
-}
+// 铁律②唯一豁免：鉴权与账户路由不是热榜信源，不能放进 src/routes（会被目录扫描器接管并 405）
+app.route("/auth", authRouter);
+app.route("/account", accountRouter);
 
 // 个性化新闻喜好度评分接口（GET 单条评分，优先检查 SQLite 缓存）
 app.get("/score", async (c) => {
   try {
+    const { userId } = getAuthUser(c);
+    const limited = scoreRateGuard(c, userId);
+    if (limited) return limited;
+
     const forceRescore =
       c.req.query("force") === "true" || c.req.query("rescore") === "true";
     const input: ScoreInputItem = {
@@ -148,7 +92,8 @@ app.get("/score", async (c) => {
       );
     }
 
-    const result = await scoreNewsItem(input, { forceRescore });
+    const ctx = await buildScoreContext(c);
+    const result = await scoreNewsItem(input, ctx, { forceRescore });
     return c.json({
       code: 200,
       message: "评分成功",
@@ -165,6 +110,10 @@ app.get("/score", async (c) => {
 // 个性化新闻喜好度评分接口（POST 支持单条或批量评分与降序排列，优先检查 SQLite 缓存）
 app.post("/score", async (c) => {
   try {
+    const { userId } = getAuthUser(c);
+    const limited = scoreRateGuard(c, userId);
+    if (limited) return limited;
+
     let body: any;
     const contentType = c.req.header("content-type") || "";
     if (contentType.includes("application/json")) {
@@ -194,9 +143,10 @@ app.post("/score", async (c) => {
             : null;
 
     if (batchItems !== null) {
+      const ctx = await buildScoreContext(c);
       const cacheOnly = c.req.query("cacheOnly") === "true" || body?.cacheOnly === true;
       if (cacheOnly) {
-        const cachedList = await lookupCachedScoresBatch(batchItems);
+        const cachedList = await lookupCachedScoresBatch(userId, batchItems, ctx.promptHash);
         return c.json({
           code: 200,
           message: "缓存查询成功",
@@ -210,7 +160,7 @@ app.post("/score", async (c) => {
       const shouldSort = querySort || body?.sort === true;
       const concurrency = typeof body?.concurrency === "number" ? body.concurrency : undefined;
 
-      const scoredList = await scoreNewsBatch(batchItems, { forceRescore, concurrency });
+      const scoredList = await scoreNewsBatch(batchItems, ctx, { forceRescore, concurrency });
       if (shouldSort) {
         scoredList.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
       }
@@ -238,7 +188,7 @@ app.post("/score", async (c) => {
       );
     }
 
-    const result = await scoreNewsItem(input, { forceRescore });
+    const result = await scoreNewsItem(input, await buildScoreContext(c), { forceRescore });
     return c.json({
       code: 200,
       message: "评分成功",
@@ -274,7 +224,8 @@ app.post("/score/cache", async (c) => {
           ? body.data
           : [];
 
-    const cachedList = await lookupCachedScoresBatch(batchItems);
+    const ctx = await buildScoreContext(c);
+    const cachedList = await lookupCachedScoresBatch(ctx.userId, batchItems, ctx.promptHash);
     return c.json({
       code: 200,
       message: "缓存查询成功",
@@ -311,8 +262,12 @@ const handleManualScoreUpdate = async (c: any) => {
           ? body.data
           : null;
 
+    const { userId } = getAuthUser(c);
+
     if (batchItems !== null) {
-      const results = await Promise.all(batchItems.map((item) => updateManualScoreItem(item)));
+      const results = await Promise.all(
+        batchItems.map((item) => updateManualScoreItem(userId, item)),
+      );
       return c.json({
         code: 200,
         message: "批量用户评分修正已保存",
@@ -321,7 +276,7 @@ const handleManualScoreUpdate = async (c: any) => {
       });
     }
 
-    const result = await updateManualScoreItem(body as ManualScoreInput);
+    const result = await updateManualScoreItem(userId, body as ManualScoreInput);
     return c.json({
       code: 200,
       message: result.isUserModified ? "用户评分修正已保存" : "已重置为 AI 原始评分",
@@ -366,6 +321,7 @@ const handleNewsReadStatusUpdate = async (c: any) => {
           : null;
 
     if (batchItems !== null) {
+      const { userId } = getAuthUser(c);
       const defaultIsRead = typeof body?.isRead === "boolean" ? body.isRead : true;
       const results: any[] = [];
       for (const item of batchItems) {
@@ -377,7 +333,7 @@ const handleNewsReadStatusUpdate = async (c: any) => {
                   ...item,
                   isRead: item.isRead !== undefined ? item.isRead : defaultIsRead,
                 };
-          results.push(await updateNewsReadStatusItem(payloadItem));
+          results.push(await updateNewsReadStatusItem(userId, payloadItem));
         } catch {
           // 忽略单条缺少内容的异常，保证批量顺畅完成
         }
@@ -390,7 +346,7 @@ const handleNewsReadStatusUpdate = async (c: any) => {
       });
     }
 
-    const result = await updateNewsReadStatusItem(body as ReadStatusInput);
+    const result = await updateNewsReadStatusItem(getAuthUser(c).userId, body as ReadStatusInput);
     return c.json({
       code: 200,
       message: result.isRead ? "已标记为已读" : "已标记为未读",
@@ -412,7 +368,7 @@ app.patch("/score/read", handleNewsReadStatusUpdate);
 app.get("/score/read", async (c) => {
   try {
     const limit = c.req.query("limit") ? parseInt(c.req.query("limit")!, 10) : 5000;
-    const hashes = await getAllReadNewsHashes(limit);
+    const hashes = await getAllReadNewsHashes(getAuthUser(c).userId, limit);
     return c.json({
       code: 200,
       total: hashes.length,
@@ -429,11 +385,12 @@ app.get("/score/read", async (c) => {
 // 查询数据库中存储的新闻打分与用户修正记录接口（供将来 AI 自动调整推荐逻辑或后台分析调用）
 const handleQueryScoreRecords = (defaultOnlyModified: boolean) => async (c: any) => {
   try {
+    const { userId } = getAuthUser(c);
     const idParam = c.req.query("id");
     const hashParam = c.req.query("newsHash") || c.req.query("hash");
 
     if (idParam && /^\d+$/.test(idParam)) {
-      const row = await getScoreRecordById(parseInt(idParam, 10));
+      const row = await getScoreRecordById(userId, parseInt(idParam, 10));
       if (!row) {
         return c.json({ code: 404, message: "未找到对应的评分记录" }, 404);
       }
@@ -443,16 +400,14 @@ const handleQueryScoreRecords = (defaultOnlyModified: boolean) => async (c: any)
           ...rowToScoreResult(row, true),
           source: row.source,
           title: row.title,
-          desc: row.desc_text,
           url: row.url,
-          formattedText: row.formatted_text,
           aiModel: row.ai_model,
         },
       });
     }
 
     if (hashParam) {
-      const row = await getScoreRecordByHash(hashParam.trim());
+      const row = await getScoreRecordByHash(userId, hashParam.trim());
       if (!row) {
         return c.json({ code: 404, message: "未找到对应的评分记录" }, 404);
       }
@@ -462,9 +417,7 @@ const handleQueryScoreRecords = (defaultOnlyModified: boolean) => async (c: any)
           ...rowToScoreResult(row, true),
           source: row.source,
           title: row.title,
-          desc: row.desc_text,
           url: row.url,
-          formattedText: row.formatted_text,
           aiModel: row.ai_model,
         },
       });
@@ -486,7 +439,7 @@ const handleQueryScoreRecords = (defaultOnlyModified: boolean) => async (c: any)
     const limit = c.req.query("limit") ? parseInt(c.req.query("limit"), 10) : 100;
     const offset = c.req.query("offset") ? parseInt(c.req.query("offset"), 10) : 0;
 
-    const { total, items } = await queryScoreRecords({
+    const { total, items } = await queryScoreRecords(userId, {
       onlyUserModified,
       onlyRead,
       source,
@@ -498,9 +451,7 @@ const handleQueryScoreRecords = (defaultOnlyModified: boolean) => async (c: any)
       ...rowToScoreResult(row, true),
       source: row.source,
       title: row.title,
-      desc: row.desc_text,
       url: row.url,
-      formattedText: row.formatted_text,
       aiModel: row.ai_model,
     }));
 
@@ -521,27 +472,5 @@ const handleQueryScoreRecords = (defaultOnlyModified: boolean) => async (c: any)
 app.get("/score/records", handleQueryScoreRecords(false));
 app.get("/score/manual", handleQueryScoreRecords(true));
 app.get("/score/feedback", handleQueryScoreRecords(true));
-
-// 获取全部路由
-app.get("/all", (c) =>
-  c.json(
-    {
-      code: 200,
-      count: allRoutePath.length,
-      routes: allRoutePath.map((path) => {
-        // 是否处于排除名单
-        if (excludeRoutes.includes(path)) {
-          return {
-            name: path,
-            path: undefined,
-            message: "This interface is temporarily offline",
-          };
-        }
-        return { name: path, path: `/${path}` };
-      }),
-    },
-    200,
-  ),
-);
 
 export default app;

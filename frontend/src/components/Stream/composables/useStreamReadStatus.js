@@ -1,9 +1,17 @@
 import { reactive } from "vue";
 import { mainStore } from "@/store";
+import { useAuthStore } from "@/store/auth";
 import { markNewsRead, getReadNewsHashes } from "@/api";
 
 export function useStreamReadStatus({ onReadStatusChange } = {}) {
   const store = mainStore();
+  const authStore = useAuthStore();
+
+  // 已读集合按用户隔离：归属不一致时清空，避免切换账号后串读
+  if (store.readNewsKeysOwner !== (authStore.userId ?? null)) {
+    store.readNewsKeys = [];
+    store.readNewsKeysOwner = authStore.userId ?? null;
+  }
 
   // displayedReadSet: 当前页面视口中“已生效打标为已读”的条目集合
   // 页面刚进入时加载历史已读数据，阅读过程中新读条目不立即加入此集合（不立即打标）
@@ -37,6 +45,7 @@ export function useStreamReadStatus({ onReadStatusChange } = {}) {
     }
     const arr = Array.from(persistedReadSet);
     store.readNewsKeys = arr.length > 5000 ? arr.slice(arr.length - 5000) : arr;
+    store.readNewsKeysOwner = authStore.userId ?? null;
   };
 
   const syncReadSetToStore = (immediate = false) => {
@@ -56,6 +65,12 @@ export function useStreamReadStatus({ onReadStatusChange } = {}) {
       readSyncTimer = null;
     }
     if (pendingReadSyncMap.size === 0) return;
+
+    // 未登录时不落库，仅保留本地视觉状态
+    if (!authStore.isAuthed) {
+      pendingReadSyncMap.clear();
+      return;
+    }
 
     const batchItems = Array.from(pendingReadSyncMap.values());
     pendingReadSyncMap.clear();
@@ -303,7 +318,28 @@ export function useStreamReadStatus({ onReadStatusChange } = {}) {
     flushReadSyncQueue();
   };
 
+  /**
+   * 清空本地已读状态（登录/切换账号时调用，防止跨账号串读）
+   */
+  const resetReadState = () => {
+    displayedReadSet.clear();
+    persistedReadSet.clear();
+    sessionNewlyReadSet.clear();
+    pendingReadSyncMap.clear();
+    if (readSyncTimer) {
+      clearTimeout(readSyncTimer);
+      readSyncTimer = null;
+    }
+    if (storeSyncTimer) {
+      clearTimeout(storeSyncTimer);
+      storeSyncTimer = null;
+    }
+    store.readNewsKeys = [];
+    store.readNewsKeysOwner = authStore.userId ?? null;
+  };
+
   const loadReadHashesFromBackend = async () => {
+    if (!authStore.isAuthed) return;
     try {
       const res = await getReadNewsHashes(5000);
       const hashes = Array.isArray(res?.hashes)
@@ -350,5 +386,6 @@ export function useStreamReadStatus({ onReadStatusChange } = {}) {
     setArticleItemRef,
     getArticleItemRefSetter,
     loadReadHashesFromBackend,
+    resetReadState,
   };
 }

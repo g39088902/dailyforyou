@@ -1,9 +1,12 @@
 import { ref, reactive, computed } from "vue";
 import { scoreNews, queryCachedScoresBatch, updateManualScore } from "@/api";
+import { useAuthStore } from "@/store/auth";
+import { AUTH_EVENTS, emitAuthEvent } from "@/utils/authEvents";
 
 export const MAX_SCORE_CONCURRENCY = 5;
 
 export function useStreamScoring({ onScoreReadSync, isAborted = () => false } = {}) {
+  const authStore = useAuthStore();
   // key: _uniqueKey -> { status: 'pending' | 'scoring' | 'done' | 'error', score?: number, layer?: string, reason?: string, newsHash?: string, isUserModified?: boolean, fromCache?: boolean, isRead?: boolean }
   const scoreMap = reactive({});
   const scoreQueue = [];
@@ -212,6 +215,8 @@ export function useStreamScoring({ onScoreReadSync, isAborted = () => false } = 
 
   const enqueueSourceArticlesForScoring = (source, items, isNew, runId) => {
     if (!Array.isArray(items) || items.length === 0) return;
+    // 评分与已读均需登录，未登录时不发请求、不占队列
+    if (!authStore.isAuthed) return;
 
     const tasksToProcess = [];
 
@@ -315,6 +320,12 @@ export function useStreamScoring({ onScoreReadSync, isAborted = () => false } = 
   };
 
   const commitManualScore = async ({ item, newScore, newLayer }) => {
+    if (!authStore.isAuthed) {
+      window.$message?.info("登录后才能保存评分修正");
+      emitAuthEvent(AUTH_EVENTS.OPEN_LOGIN);
+      return;
+    }
+
     const uniqueKey = item._uniqueKey;
     pendingScoreUpdates.delete(uniqueKey);
     const prevInfo = scoreMap[uniqueKey] ? { ...scoreMap[uniqueKey] } : null;

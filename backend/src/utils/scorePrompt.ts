@@ -1,8 +1,13 @@
+import crypto from "crypto";
+
 /**
- * 个性化新闻喜好度预测与排序打分 Prompt
+ * 个性化新闻喜好度预测与排序打分 Prompt（系统默认值）
  * 已根据 SQLite 历史用户手动修正样本（is_user_modified = 1）校准优化
+ *
+ * 说明：本常量作为 system 消息使用，不再包含末尾的【待评分新闻】分隔符，
+ * 新闻正文由 buildScoreMessages 拼进 user 消息。
  */
-export const SCORE_PROMPT = `# Role: 个性化新闻喜好度预测与排序打分器
+export const DEFAULT_SCORE_PROMPT = `# Role: 个性化新闻喜好度预测与排序打分器
 
 请根据以下【用户画像与五层打分漏斗】，预测用户对输入新闻的喜欢程度（0~100整数），用于新闻流降序排列。
 
@@ -49,9 +54,31 @@ export const SCORE_PROMPT = `# Role: 个性化新闻喜好度预测与排序打�
 
 ## 四、输出格式
 仅输出合法JSON，不要输出Markdown代码块以外的解释：
-{"score": <0-100整数>, "layer": "<L1|L2|L3|L4|L5|Uncertain>", "reason": "<25字内命中或排除依据>"}
+{"score": <0-100整数>, "layer": "<L1|L2|L3|L4|L5|Uncertain>", "reason": "<25字内命中或排除依据>"}`;
 
----
-【待评分新闻】：`;
+/** 新闻正文在 user 消息中的前缀 */
+export const NEWS_MESSAGE_PREFIX = "【待评分新闻】：";
 
-export default SCORE_PROMPT;
+/** 兼容别名：历史代码统一引用 SCORE_PROMPT */
+export const SCORE_PROMPT = DEFAULT_SCORE_PROMPT;
+
+export type ChatMessage = { role: "system" | "user"; content: string };
+
+/**
+ * 组装评分请求的消息体：system 为 prompt（默认或用户自定义），user 为待评分新闻
+ */
+export const buildScoreMessages = (
+  systemPrompt: string,
+  formattedText: string,
+): ChatMessage[] => [
+  { role: "system", content: systemPrompt },
+  { role: "user", content: `${NEWS_MESSAGE_PREFIX}\n${formattedText}` },
+];
+
+/**
+ * 计算 prompt 指纹（用于评分缓存命中判断）
+ */
+export const hashPrompt = (prompt: string): string =>
+  crypto.createHash("md5").update(prompt).digest("hex");
+
+export default DEFAULT_SCORE_PROMPT;

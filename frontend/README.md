@@ -128,20 +128,24 @@ cd DailyHot
 pnpm install
 ```
 
-### 2. 配置后端 API
+### 2. 配置后端服务
 
 复制或新建 `.env` 文件：
 
 ```env
-# 填入您的 DailyHotApi 后端服务地址（本地或线上部署的 API 节点）
-VITE_GLOBAL_API="http://localhost:6688"
+# 用户服务（登录 / 评分 / 账户 / Prompt）
+VITE_GLOBAL_API="http://localhost:6690"
+
+# 爬虫服务（榜单抓取）
+VITE_FEED_API="http://localhost:6688"
 
 # 站点路由基准路径（默认为 /）
 VITE_DIR="/"
 ```
 
 > [!TIP]
-> 为获得完整的 **AI 智能打分** 与 **SQLite 已读/校准同步** 体验，请搭配部署 [DailyHotApi](https://github.com/imsyy/DailyHotApi) 后端。
+> 两个后端分别位于同级的 [`backend/`](../backend)（:6690）与 [`crawler/`](../crawler)（:6688）。
+> 生产环境用同域反代，`.env.production` 中写相对路径 `/api` 与 `/feed`，避免 CORS 与硬编码 IP。
 
 ### 3. 本地开发与构建
 
