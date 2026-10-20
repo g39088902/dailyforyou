@@ -1,0 +1,109 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="440" viewBox="0 0 1280 440" role="img" aria-label="DailyForYou：今天，只读值得读的">
+  <defs>
+    <linearGradient id="paper" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FCF9F3"/>
+      <stop offset="1" stop-color="#F4EDE1"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#E24A2E"/>
+      <stop offset="1" stop-color="#F0A24A"/>
+    </linearGradient>
+    <pattern id="dots" width="26" height="26" patternUnits="userSpaceOnUse">
+      <circle cx="1.5" cy="1.5" r="1.1" fill="#DCD1BD"/>
+    </pattern>
+    <radialGradient id="glowWarm" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#F3D8C6" stop-opacity="0.55"/>
+      <stop offset="0.65" stop-color="#F3D8C6" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#F3D8C6" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowCool" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#DCE9DF" stop-opacity="0.6"/>
+      <stop offset="1" stop-color="#DCE9DF" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="frame">
+      <rect x="0" y="0" width="1280" height="440" rx="18"/>
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#frame)">
+    <rect width="1280" height="440" fill="url(#paper)"/>
+    <rect width="1280" height="440" fill="url(#dots)" opacity="0.55"/>
+    <circle cx="1110" cy="26" r="290" fill="url(#glowWarm)"/>
+    <circle cx="760" cy="430" r="200" fill="url(#glowCool)"/>
+    <rect x="0" y="0" width="1280" height="5" fill="url(#accent)"/>
+
+    <!-- Brand mark -->
+    <rect x="72" y="58" width="40" height="40" rx="12" fill="#171B22"/>
+    <path d="M82 69 H103 L95.5 78 V89 L91.5 91.5 V78 Z" fill="#FCF9F3"/>
+    <text x="126" y="76" font-family="'Helvetica Neue',Arial,sans-serif" font-size="15" font-weight="700" letter-spacing="0.4" fill="#171B22">DailyForYou</text>
+    <text x="126" y="93" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10.5" letter-spacing="1.6" fill="#9B8F7A">PERSONAL INTELLIGENCE STREAM</text>
+
+    <!-- Headline -->
+    <text x="72" y="150" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="12.5" letter-spacing="1.4" fill="#9B8F7A">43 个信源 · 一条按你口味排序的信息流</text>
+    <text x="72" y="224" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="56" font-weight="700" letter-spacing="0.5" fill="#171B22">今天，只读</text>
+    <text x="72" y="292" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="56" font-weight="700" letter-spacing="0.5" fill="#171B22">值得读的<tspan fill="#E24A2E">。</tspan></text>
+
+    <text x="72" y="336" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="16.5" fill="#4C5360">把上千条更新先读懂，再按你的画像打分排序。</text>
+    <text x="72" y="361" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="12.5" fill="#857A67">0–100 分 · 五层漏斗 · 每条 25 字理由 · 一次打分，永久复用</text>
+
+    <!-- Pills -->
+    <g font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="11.5">
+      <rect x="72" y="386" width="96" height="28" rx="14" fill="#FFFFFF" stroke="#E6DACA"/>
+      <text x="120" y="404" text-anchor="middle" fill="#5E5546">43 信源</text>
+      <rect x="178" y="386" width="96" height="28" rx="14" fill="#FFFFFF" stroke="#E6DACA"/>
+      <text x="226" y="404" text-anchor="middle" fill="#5E5546">0–100 分</text>
+      <rect x="284" y="386" width="96" height="28" rx="14" fill="#FFFFFF" stroke="#E6DACA"/>
+      <text x="332" y="404" text-anchor="middle" fill="#5E5546">五层漏斗</text>
+      <rect x="390" y="386" width="112" height="28" rx="14" fill="#171B22"/>
+      <text x="446" y="404" text-anchor="middle" fill="#FCF9F3">毫秒级命中</text>
+    </g>
+
+    <!-- Feed card -->
+    <rect x="760" y="68" width="456" height="324" rx="20" fill="#E6DBC8" opacity="0.55"/>
+    <rect x="752" y="58" width="456" height="324" rx="20" fill="#FFFFFF" stroke="#E9DFCE"/>
+
+    <text x="780" y="88" font-family="'Helvetica Neue',Arial,sans-serif" font-size="9.5" letter-spacing="2.2" fill="#B0A288">YOUR FEED</text>
+    <text x="780" y="113" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="15" font-weight="700" fill="#171B22">今日情报流</text>
+    <rect x="1096" y="74" width="88" height="26" rx="13" fill="#F7EFE2"/>
+    <text x="1140" y="91" text-anchor="middle" font-family="'Helvetica Neue',Arial,sans-serif" font-size="10.5" fill="#8A6A3E">43 → 1</text>
+
+    <!-- Row 1 -->
+    <rect x="776" y="140" width="408" height="40" rx="10" fill="#FDF2EC"/>
+    <text x="790" y="165" font-family="'Helvetica Neue',Arial,sans-serif" font-size="10.5" fill="#B0A288">01</text>
+    <rect x="818" y="151" width="30" height="18" rx="9" fill="#F9DFD8"/>
+    <text x="833" y="164" text-anchor="middle" font-family="'Helvetica Neue',Arial,sans-serif" font-size="9.5" font-weight="700" fill="#C0392B">L1</text>
+    <rect x="860" y="156" width="196" height="8" rx="4" fill="#DCD3C3"/>
+    <text x="1172" y="166" text-anchor="end" font-family="'Helvetica Neue',Arial,sans-serif" font-size="16" font-weight="700" fill="#D93F2B">96</text>
+
+    <!-- Row 2 -->
+    <text x="790" y="209" font-family="'Helvetica Neue',Arial,sans-serif" font-size="10.5" fill="#B0A288">02</text>
+    <rect x="818" y="195" width="30" height="18" rx="9" fill="#FAEAD5"/>
+    <text x="833" y="208" text-anchor="middle" font-family="'Helvetica Neue',Arial,sans-serif" font-size="9.5" font-weight="700" fill="#B4680F">L2</text>
+    <rect x="860" y="200" width="248" height="8" rx="4" fill="#DCD3C3"/>
+    <text x="1172" y="210" text-anchor="end" font-family="'Helvetica Neue',Arial,sans-serif" font-size="16" font-weight="700" fill="#D9821E">88</text>
+
+    <!-- Row 3 -->
+    <text x="790" y="253" font-family="'Helvetica Neue',Arial,sans-serif" font-size="10.5" fill="#B0A288">03</text>
+    <rect x="818" y="239" width="30" height="18" rx="9" fill="#F5EDD8"/>
+    <text x="833" y="252" text-anchor="middle" font-family="'Helvetica Neue',Arial,sans-serif" font-size="9.5" font-weight="700" fill="#8F741C">L4</text>
+    <rect x="860" y="244" width="168" height="8" rx="4" fill="#DCD3C3"/>
+    <text x="1172" y="254" text-anchor="end" font-family="'Helvetica Neue',Arial,sans-serif" font-size="16" font-weight="700" fill="#A8862A">76</text>
+
+    <!-- Row 4 -->
+    <text x="790" y="297" font-family="'Helvetica Neue',Arial,sans-serif" font-size="10.5" fill="#B0A288">04</text>
+    <rect x="818" y="283" width="30" height="18" rx="9" fill="#EDEEF1"/>
+    <text x="833" y="296" text-anchor="middle" font-family="'Helvetica Neue',Arial,sans-serif" font-size="8.5" fill="#7B8492">—</text>
+    <rect x="860" y="288" width="220" height="8" rx="4" fill="#DCD3C3"/>
+    <text x="1172" y="298" text-anchor="end" font-family="'Helvetica Neue',Arial,sans-serif" font-size="16" font-weight="700" fill="#8A93A1">62</text>
+
+    <!-- Row 5 -->
+    <text x="790" y="341" font-family="'Helvetica Neue',Arial,sans-serif" font-size="10.5" fill="#B0A288">05</text>
+    <rect x="818" y="327" width="30" height="18" rx="9" fill="#E9ECF0"/>
+    <text x="833" y="340" text-anchor="middle" font-family="'Helvetica Neue',Arial,sans-serif" font-size="9.5" font-weight="700" fill="#7C8592">L5</text>
+    <rect x="860" y="332" width="140" height="8" rx="4" fill="#DCD3C3"/>
+    <text x="1172" y="342" text-anchor="end" font-family="'Helvetica Neue',Arial,sans-serif" font-size="16" font-weight="700" fill="#A3ABB6">12</text>
+
+    <line x1="780" y1="356" x2="1180" y2="356" stroke="#F0E9DC"/>
+    <text x="780" y="372" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="10" fill="#A99C85">L1 必看 · L2 高价值 · L4 值得看 · L5 直接过滤</text>
+  </g>
+</svg>
