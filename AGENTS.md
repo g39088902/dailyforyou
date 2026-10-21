@@ -27,13 +27,13 @@
 DailyForYou 从传统单调的“热榜聚合页面”彻底演化为**面向工程师、投资人与深度思考者的高信噪比实时情报中枢**。
 
 项目由三个平级目录组成，职责严格分离：
-- **`crawler/` (爬虫服务，:6688)**：基于 **Hono v4 + DeepSeek AI + Node.js 22 原生 `node:sqlite`**。只负责抓取信源、翻译英文资讯、把结果写入 `news_items`；**不处理用户、不做评分**。
-- **`backend/` (用户服务，:6690)**：只负责钱包登录、用户配置、评分、Prompt 管理与已读同步；**不抓取、不翻译、不写入新闻正文**，仅在 `user_news_states` 里保存最小索引字段（来源/标题/链接）。
-- **`frontend/` (前端，:6699)**：基于 **Vue 3 + Vite + Naive UI + Pinia** 的看板，榜单请求走爬虫，账户与评分请求走用户服务。
+- **`crawler/` (爬虫定时任务，无 HTTP 端口)**：基于 **DeepSeek AI + Node.js 22 原生 `node:sqlite` / libSQL**。作为离线/定时调度器部署（如家用宽带物理机），单向出站抓取信源、翻译英文资讯、把结果写入 `news_items`；**不提供 HTTP 服务、不处理用户、不做评分**。
+- **`backend/` (用户与新闻服务，:6690)**：全站唯一对外 HTTP API 服务端。负责从数据库 `news_items` 直接读取新闻列表（`/:source`）秒级供给前端、钱包登录、用户配置、评分、Prompt 管理与已读同步；**不抓取、不翻译源站**。
+- **`frontend/` (前端，:6699)**：基于 **Vue 3 + Vite + Naive UI + Pinia** 的看板，所有请求（资讯、账户、评分）统一走用户与新闻后端服务（:6690）。
 
 ### 核心业务能力
 1. **深度 AI 降噪**：采用严苛的五层漏斗（L1~L5 色阶体系，0~100 分），直接识别高能破坏性技术变动与宏观经济决议，压制营销口水。
-2. **毫秒级持久化缓存**：基于 Node 22 原生内置 SQLite，无需编译本地 C++ 驱动，基于 MD5 指纹实现一次打分、永久复用。
+2. **毫秒级持久化缓存**：基于 Node 22 原生内置 SQLite / 远程 libSQL，无需编译本地 C++ 驱动，基于 MD5 指纹实现一次打分、永久复用。
 3. **人机协同 (Human-in-the-Loop)**：前端悬浮滑块支持用户一键手动修正打分，自动记录修正数据，为后续私有化模型/Prompt 校准沉淀样本。
 4. **全网已读同步与 Inbox-Zero**：浏览与点击状态沉淀至后端 SQLite，支持“隐藏已读”，实现一键清空全网残留噪声。
 
@@ -41,14 +41,14 @@ DailyForYou 从传统单调的“热榜聚合页面”彻底演化为**面向工
 
 ## 2. 技术栈与环境要求
 
-| 维度 | crawler（爬虫服务） | backend（用户服务） | frontend（前端） |
+| 维度 | crawler（爬虫调度器） | backend（用户与新闻服务） | frontend（前端） |
 | :--- | :--- | :--- | :--- |
-| **运行时 / 框架** | Node.js >= 22.5、Hono v4、TypeScript 5 | Node.js >= 22.5、Hono v4、TypeScript 5 | Vue 3.5、Vite 4.5、JavaScript |
-| **持久化与缓存** | 原生 `node:sqlite` / libSQL、NodeCache（进程内） | 原生 `node:sqlite` / libSQL | Pinia persist、LocalStorage |
+| **运行时 / 框架** | Node.js >= 22.5、CLI 任务调度器、TypeScript 5 | Node.js >= 22.5、Hono v4、TypeScript 5 | Vue 3.5、Vite 4.5、JavaScript |
+| **持久化与缓存** | 原生 `node:sqlite` / libSQL、NodeCache（抓取去重） | 原生 `node:sqlite` / libSQL | Pinia persist、LocalStorage |
 | **AI 引擎** | DeepSeek（翻译） | DeepSeek（评分） | - |
-| **鉴权** | 无（公开只读） | 钱包签名登录 + JWT | Bearer Token |
+| **鉴权** | 无（无对外 HTTP 端口） | 钱包签名登录 + JWT（新闻接口公开只读） | Bearer Token |
 | **包管理器** | `pnpm` | `pnpm` | `pnpm` |
-| **默认端口** | `6688` | `6690` | `6699` |
+| **默认端口** | 无（离线 CLI/Daemon） | `6690` | `6699` |
 
 ---
 
@@ -63,86 +63,87 @@ flowchart LR
         AuthStore["鉴权状态\n(store/auth.js)"]
     end
 
-    subgraph Crawler["crawler 爬虫服务 (:6688)"]
-        CRegistry["信源扫描注册\n(registry.ts)"]
-        Adapters["43 个信源适配器\n(src/routes/*.ts)"]
-        Translator["DeepSeek 并发汉化\n(translator.ts)"]
-        Cache["NodeCache 进程内缓存\n(cache.ts)"]
-        NewsRepo["新闻入库\n(db/newsRepo.ts)"]
-    end
-
-    subgraph UserSvc["backend 用户服务 (:6690)"]
+    subgraph UserSvc["backend 用户与新闻服务 (:6690)"]
+        NewsRouter["新闻供给 /:source\n(routes/news.ts)"]
         AuthApp["鉴权 /auth\n(auth/*)"]
         AccountApp["账户与 Prompt /account\n(api/account.ts)"]
         ScoreApp["评分 /score*\n(registry.ts)"]
         Scorer["评分引擎\n(scorer.ts)"]
         UserRepo["用户数据\n(scoreDb/authDb/promptDb)"]
+        NewsRepo["新闻读取\n(newsDb.ts)"]
+    end
+
+    subgraph Crawler["crawler 离线/定时调度器 (无 HTTP 端口)"]
+        Runner["任务调度器\n(runner.ts)"]
+        Adapters["43 个信源适配器\n(src/routes/*.ts)"]
+        Translator["DeepSeek 并发汉化\n(translator.ts)"]
+        NewsWriter["新闻写入\n(db/newsRepo.ts)"]
     end
 
     subgraph Storage["数据库（同一实例，表归属分离）"]
-        NewsTable["news_items\n爬虫独占写入"]
-        UserTables["users / auth_* / user_profiles / user_news_states\n用户服务独占"]
+        NewsTable["news_items\n爬虫定时写入 / 后端只读供给"]
+        UserTables["users / auth_* / user_profiles / user_news_states\n后端独占读写"]
     end
 
     DeepSeekLLM["DeepSeek LLM API"]
     TargetSites["源站 / RSS / 开放 API"]
 
-    Front -->|"GET /{source}"| CRegistry
+    Front -->|"GET /:source (毫秒级读库)"| NewsRouter
     Front -->|"/auth /account /score"| AuthApp
-    CRegistry --> Adapters
-    Adapters -->|Axios / RSS| TargetSites
-    Adapters -.->|英文汉化| Translator
-    Translator <--> DeepSeekLLM
-    Adapters -.->|热点缓存| Cache
-    Adapters --> NewsRepo
+    NewsRouter --> NewsRepo
     NewsRepo --> NewsTable
     ScoreApp --> Scorer
     Scorer <--> DeepSeekLLM
     Scorer --> UserRepo
     UserRepo --> UserTables
+
+    Runner --> Adapters
+    Adapters -->|Axios / RSS| TargetSites
+    Adapters -.->|英文汉化| Translator
+    Translator <--> DeepSeekLLM
+    Adapters --> NewsWriter
+    NewsWriter --> NewsTable
 ```
 
-### 3.2 流式加载、登录与评分时序
+### 3.2 离线抓取、流式加载与评分时序
 
 ```mermaid
 sequenceDiagram
     autonumber
     actor User as 用户
     participant Front as 前端
-    participant Crawler as 爬虫服务 (:6688)
-    participant UserSvc as 用户服务 (:6690)
+    participant UserSvc as 后端服务 (:6690)
+    participant Crawler as 爬虫调度器 (家用宽带/定时)
     participant DB as 数据库
     participant LLM as DeepSeek
 
-    User->>Front: 打开首页
-    Front->>Crawler: GET /{source}（逐个信源加载）
-    Crawler->>Crawler: 抓取 + 翻译 + 去重（NodeCache 命中则跳过）
-    Crawler->>DB: 非缓存命中时 upsert news_items
-    Crawler-->>Front: 返回资讯列表（每源最多 30 条）
+    rect rgb(245, 245, 255)
+    Note over Crawler,DB: 爬虫定时后台运行（无 HTTP 端口，无前端请求驱动）
+    Crawler->>Crawler: 定时触发 / CLI 调度各个信源适配器
+    Crawler->>Crawler: 抓取 + DeepSeek 汉化 + 去重
+    Crawler->>DB: upsert 写入 news_items 表（含热度/时间/封面等）
+    end
 
     rect rgb(240, 248, 255)
-    Note over Front,UserSvc: 登录（未登录只浏览，不评分）
-    Front->>UserSvc: POST /auth/nonce
-    UserSvc-->>Front: 待签消息（含一次性 nonce）
-    Front->>Front: personal_sign
-    Front->>UserSvc: POST /auth/verify
-    UserSvc-->>Front: JWT + 用户信息
+    Note over Front,UserSvc: 用户浏览与秒级数据供给
+    User->>Front: 打开首页
+    Front->>UserSvc: GET /{source}（如 /cls, /jin10）
+    UserSvc->>DB: SELECT * FROM news_items WHERE source_name = ?
+    DB-->>UserSvc: 返回最新记录
+    UserSvc-->>Front: <10ms 直接返回资讯列表
     end
 
     rect rgb(255, 250, 240)
-    Note over Front,LLM: 评分（全部请求携带 Bearer Token）
-    Front->>UserSvc: POST /score/cache（批量）
-    UserSvc->>DB: 按 (user_id, news_hash) 查 user_news_states
-    DB-->>UserSvc: 同 prompt_hash 的命中项
-    UserSvc-->>Front: 命中评分
-    Front->>UserSvc: GET /score（未命中逐条，5 并发）
-    UserSvc->>LLM: system = 用户 Prompt，user = 新闻正文
-    LLM-->>UserSvc: {score, layer, reason}
-    UserSvc->>DB: upsert user_news_states（含标题/来源/链接快照）
+    Note over Front,LLM: 评分与已读（全部请求携带 Bearer Token）
+    Front->>UserSvc: POST /score/cache（批量查历史打分）
+    UserSvc->>DB: 查 user_news_states
+    DB-->>UserSvc: 命中评分返回
+    Front->>UserSvc: GET /score（未命中逐条评分）
+    UserSvc->>LLM: 调 DeepSeek 评分
+    UserSvc->>DB: upsert user_news_states
     UserSvc-->>Front: 返回评分
     end
-
-    rect rgb(245, 255, 245)
+```
     User->>Front: 拖动评分滑块
     Front->>UserSvc: POST /score/manual
     UserSvc->>DB: 写 user_score / is_user_modified
@@ -158,30 +159,29 @@ sequenceDiagram
 DailyForYou/
 ├── AGENTS.md / README.md / DEPLOYMENT.md
 │
-├── crawler/                          # 🕷️ 爬虫服务 (:6688) — 只抓取/翻译/入库
+├── crawler/                          # 🕷️ 爬虫调度器（无 HTTP 服务）— 只抓取/翻译/入库
 │   ├── src/
-│   │   ├── index.ts                  # 入口：连库 → 执行 crawler_migrations → 监听
-│   │   ├── app.tsx                   # Hono 装配（CORS/压缩/静态资源/首页）
-│   │   ├── registry.ts               # 自动扫描信源；去重后调用 newsRepo 入库
-│   │   ├── config.ts                 # 端口、缓存 TTL、上游超时、翻译 Key
+│   │   ├── index.ts                  # 入口：CLI / Daemon 模式调度器
+│   │   ├── runner.ts                 # 任务执行器（并发池、Mock 上下文、调用 routes 入库）
+│   │   ├── config.ts                 # 调度间隔、上游超时、翻译 Key
 │   │   ├── types.d.ts                # 榜单相关类型
 │   │   ├── db/
 │   │   │   ├── client.ts             # libSQL / node:sqlite 连接与执行器
 │   │   │   ├── migrations.ts         # crawler_migrations 账本（仅 news_items）
-│   │   │   └── newsRepo.ts           # 批量 upsert 新闻（含翻译后的标题摘要）
-│   │   ├── routes/                   # 43 个信源适配器（自动扫描装载）
-│   │   ├── utils/                    # cache/getData/translator/getToken/logger...
-│   │   └── views/                    # 服务端首页与错误页
-│   ├── public/                       # favicon 等静态资源
+│   │   │   └── newsRepo.ts           # 批量 upsert 新闻（含元数据与翻译后标题摘要）
+│   │   ├── routes/                   # 43 个信源适配器
+│   │   └── utils/                    # cache/getData/translator/getToken/logger...
 │   ├── scripts/                      # 运维脚本
 │   ├── Dockerfile / docker-compose.yml
 │   └── .env / .env.example
 │
-├── backend/                          # 👤 用户服务 (:6690) — 只处理用户/评分/Prompt
+├── backend/                          # 👤 用户与新闻服务 (:6690) — 全站唯一对外 API
 │   ├── src/
-│   │   ├── index.ts                  # 入口：连库 → 执行 user_migrations → 监听
+│   │   ├── index.ts                  # 入口：连库 → 执行 user_migrations → 回填 → 监听
 │   │   ├── app.tsx                   # 纯 JSON API（404/500 也返回 JSON）
-│   │   ├── registry.ts               # /auth、/account、/score*（无信源扫描）
+│   │   ├── registry.ts               # /auth、/account、/score*、/:source 路由汇聚
+│   │   ├── routes/
+│   │   │   └── news.ts               # /:source（直接读取 news_items 秒级返回）
 │   │   ├── config.ts                 # 端口、鉴权、Prompt 与限流配置
 │   │   ├── types.d.ts                # 评分与鉴权类型
 │   │   ├── auth/                     # message/jwt/middleware/providers/index
@@ -189,6 +189,7 @@ DailyForYou/
 │   │   ├── db/client.ts
 │   │   └── utils/
 │   │       ├── migrations.ts         # user_migrations 账本
+│   │       ├── newsDb.ts             # news_items 查询与旧信源回填
 │   │       ├── scoreDb.ts            # user_news_states（单表，含索引字段）
 │   │       ├── scorer.ts             # DeepSeek 评分引擎
 │   │       ├── scorePrompt.ts        # 默认 Prompt 与消息组装
@@ -227,11 +228,11 @@ DailyForYou/
    - 抓取：`import { get, post } from "../utils/getData.js"`（自带 NodeCache 与请求头兜底）
    - 解析：JSON 直接用泛型；HTML 用 `cheerio`；RSS 用 `../utils/parseRSS.js`
    - 返回：`RouterData.data` 为 `ListItem[]`，至少包含 `id/title/url`
-2. **自动注册**：`crawler/src/registry.ts` 的 `findTsFiles` 会自动扫描 `routes/`，无需手写 import。
-3. **自动入库**：`registry.ts` 在去重后调用 `persistNewsSafely(routeData.title, listData.data)`，把标题/摘要/链接写入 `news_items`（翻译已在适配器内完成）。新增信源无需额外接入代码。
+2. **自动扫描与定时执行**：`crawler/src/runner.ts` 会自动扫描 `routes/` 并执行抓取，也可以在 `DEFAULT_TARGETS` 中补充常用子分类配置。
+3. **入库与后端直接供给**：`runner.ts` 在去重后调用 `persistNewsSafely(routeData.title, listData.data, { sourceName, subType })` 写入 `news_items` 表。用户访问时，后端直接从 `news_items` 读取秒级返回。
 4. **前端登记**：`frontend/src/store/index.js` 的 `defaultNewsArr` 增加 `{ label, name, order, show, params? }`。
 5. **前端图标**：`frontend/public/logo/<sourceName>.png`。
-6. **参数别名**：`frontend/src/api/index.js` 的 `getHotLists` 已内置 `cls-*`/`jiemian-*`/`reuters-*`/`jin10-*`/`bloomberg-*` 前缀映射；新别名在此补充。
+6. **参数别名**：`frontend/src/api/index.js` 的 `getHotLists` 已内置 `cls-*`/`jiemian-*`/`reuters-*`/`jin10-*`/`bloomberg-*` 前缀映射；新别名在此补充。并在 `backend/src/utils/newsDb.ts` 的 `SOURCE_METADATA_MAP` 中注册中文元数据。
 
 ---
 
@@ -368,10 +369,9 @@ Stream View 是 DailyForYou 最核心的沉浸式情报瀑布流，各模块职�
 - 若源站使用了防盗链图片或特殊 Cookie，需在 `headers` 中妥善设置 `Referer` 与 `User-Agent`。
 
 ### 🛑 铁律六：严守服务边界
-- **爬虫不得**读写用户表（`users` / `auth_*` / `user_profiles` / `user_news_states`），也不得调用评分或鉴权逻辑。
-- **用户服务不得**抓取源站、调用翻译、写入 `news_items`；评分所需的标题/摘要一律来自前端请求体。
-- 两边共用一个数据库实例，但迁移账本独立（`crawler_migrations` / `user_migrations`），新增表必须归属明确。
-- 任何跨服务的数据需求，优先通过前端已有的请求参数传递，不要在用户服务里加"反查新闻表"的便捷分支。
+- **爬虫不得**提供对外 HTTP 服务，不得读写用户表（`users` / `auth_*` / `user_profiles` / `user_news_states`），也不得调用评分或鉴权逻辑。它只作为离线/定时任务出站抓取、翻译并批量写入 `news_items`。
+- **用户与新闻服务（backend :6690）**是全站唯一对外 API 入口，负责新闻读取供给（只读 `news_items`）、用户鉴权、评分与已读状态管理；**不得抓取源站或调用翻译**。
+- 两边共用一个数据库实例（本地 SQLite 或远程 libSQL），但迁移账本独立（`crawler_migrations` / `user_migrations`），新增表必须归属明确。
 
 ---
 
@@ -380,10 +380,14 @@ Stream View 是 DailyForYou 最核心的沉浸式情报瀑布流，各模块职�
 ### 7.1 开发与构建
 
 ```bash
-# 爬虫服务 (:6688) —— 抓取、翻译、入库
-cd crawler && pnpm install && pnpm dev
+# 爬虫调度器 —— 单次抓取测试（指定信源或全部）
+cd crawler && pnpm crawl cls
+cd crawler && pnpm crawl
 
-# 用户服务 (:6690) —— 登录、评分、Prompt
+# 爬虫调度器 —— 后台轮询模式（支持家用宽带主机部署）
+cd crawler && pnpm crawl:daemon
+
+# 用户与新闻后端 (:6690) —— 资讯供给、登录、评分、Prompt
 cd backend && pnpm install && pnpm dev
 
 # 前端 (:6699)
@@ -396,11 +400,11 @@ pnpm build
 ### 7.2 接口调试
 
 ```bash
-# 信源总览（爬虫）
-curl http://localhost:6688/all
+# 读取财联社最新资讯（后端直接读库）
+curl "http://localhost:6690/cls?limit=10"
 
-# 抓取财联社（爬虫，force 刷新会触发入库）
-curl "http://localhost:6688/cls?limit=10&cache=false"
+# 读取路透社国际分类资讯
+curl "http://localhost:6690/reuters?type=world&limit=10"
 
 # 用户服务：未登录访问评分接口应返回 401
 curl -i http://localhost:6690/score

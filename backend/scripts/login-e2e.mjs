@@ -97,15 +97,16 @@ const main = async () => {
   const replay = await request("POST", "/auth/verify", { body: { message, signature } });
   check("nonce 重放被拒", replay.status === 401, `status=${replay.status}`);
 
-  // 4. 身份接口
-  const me = await request("GET", "/auth/me", { token });
+  // 4. 账户接口（登录态校验）
+  const profile = await request("GET", "/account/profile", { token });
   check(
-    "/auth/me 返回当前用户",
-    me.status === 200 && me.json?.data?.user?.address?.toLowerCase() === address.toLowerCase(),
+    "/account/profile 返回当前用户",
+    profile.status === 200 &&
+      profile.json?.data?.identities?.[0]?.providerUserId?.toLowerCase() === address.toLowerCase(),
   );
 
-  const meNoToken = await request("GET", "/auth/me");
-  check("/auth/me 无 token 401", meNoToken.status === 401);
+  const profileNoToken = await request("GET", "/account/profile");
+  check("/account/profile 无 token 401", profileNoToken.status === 401);
 
   // 5. 评分链路
   const unique = `E2E ${Date.now()}：Jetson Orin 边缘算力部署与 CAN 总线抗干扰实践`;

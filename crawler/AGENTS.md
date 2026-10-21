@@ -396,11 +396,8 @@ pnpm build
 ### 7.2 接口调试
 
 ```bash
-# 信源总览（爬虫）
-curl http://localhost:6688/all
-
-# 抓取财联社（爬虫，force 刷新会触发入库）
-curl "http://localhost:6688/cls?limit=10&cache=false"
+# 读取财联社最新资讯（backend 直接读库）
+curl "http://localhost:6690/cls?limit=10"
 
 # 用户服务：未登录访问评分接口应返回 401
 curl -i http://localhost:6690/score

@@ -27,6 +27,7 @@ import { consumeRateLimit } from "./utils/rateLimit.js";
 import { requireAuth, type AuthEnv } from "./auth/middleware.js";
 import { authRouter } from "./auth/index.js";
 import { accountRouter } from "./api/account.js";
+import { newsRouter } from "./routes/news.js";
 import logger from "./utils/logger.js";
 
 const app = new Hono<AuthEnv>();
@@ -472,5 +473,8 @@ const handleQueryScoreRecords = (defaultOnlyModified: boolean) => async (c: any)
 app.get("/score/records", handleQueryScoreRecords(false));
 app.get("/score/manual", handleQueryScoreRecords(true));
 app.get("/score/feedback", handleQueryScoreRecords(true));
+
+// 挂载数据库新闻供给路由（/:source, /news/:source）
+app.route("/", newsRouter);
 
 export default app;

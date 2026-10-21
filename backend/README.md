@@ -1,17 +1,17 @@
-# backend · 用户服务
+# backend · 用户与新闻服务
 
-DailyForYou 的用户侧服务，默认监听 **6690**。只负责钱包登录、用户配置、评分与 Prompt 管理；**不抓取、不翻译、不写入新闻正文**。
+DailyForYou 的全站统一对外后端服务，默认监听 **6690**。负责提供新闻只读供给接口（直接从 `news_items` 数据库读取秒级返回）、钱包登录、用户配置、评分与 Prompt 管理。
 
-榜单抓取由同级的 [`crawler/`](../crawler) 服务负责（:6688）。
+新闻抓取由同级的 [`crawler/`](../crawler) 离线/定时调度器负责（可部署于家用宽带机，定时将数据写入云端数据库）。
 
 ## 职责边界
 
 | 项 | 说明 |
 | :--- | :--- |
-| 拥有的表 | `users`、`auth_identities`、`auth_nonces`、`user_profiles`、`user_news_states` |
+| 拥有的表 | `users`、`auth_identities`、`auth_nonces`、`user_profiles`、`user_news_states`（独占读写），以及 `news_items`（只读供给） |
 | 迁移账本 | `user_migrations`（`u001_core_schema` → `u003_state_index_fields`） |
-| 不做什么 | 不访问源站、不调用翻译、运行期不读取 `news_items` |
-| 索引方式 | 评分时把 `source/title/url` 作为最小索引写进 `user_news_states` |
+| 不做什么 | 不访问外部新闻源站、不调用翻译 |
+| 接口性质 | 统一对外 API：`/:source` 公开只读；`/score`、`/account` 鉴权保护 |
 
 ## 运行
 
@@ -38,13 +38,12 @@ pnpm dev                   # http://localhost:6690
 
 ## API
 
-所有 `/score*`、`/account*`、`/auth/me` 需要 `Authorization: Bearer <JWT>`。
+所有 `/score*`、`/account*` 需要 `Authorization: Bearer <JWT>`。
 
 | 方法 | 路径 | 说明 |
 | :--- | :--- | :--- |
 | POST | `/auth/nonce` | 申请一次性签名挑战 |
 | POST | `/auth/verify` | 校验签名并签发 JWT |
-| GET | `/auth/me` | 当前用户与身份 |
 | GET | `/auth/providers` | 可用登录渠道（微信/手机号为 501 占位） |
 | GET | `/account/profile` | 账户概览 |
 | GET/PUT | `/account/prompt` | 读取 / 保存自定义 Prompt |

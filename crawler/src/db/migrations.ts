@@ -4,14 +4,14 @@ import { executeSql, queryRows, runBatch } from "./client.js";
 interface Migration {
   version: string;
   description: string;
-  statements: string[];
+  statements?: string[];
+  run?: () => Promise<void>;
 }
 
 const LEDGER_TABLE = "crawler_migrations";
 
 /**
- * 爬虫服务只负责新闻库（news_items）。
- * 用户、评分、Prompt 相关的表由 backend（用户服务）独立管理，两边互不写入。
+ * 爬虫服务负责新闻库（news_items）。
  */
 const MIGRATIONS: Migration[] = [
   {
@@ -32,6 +32,38 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_news_items_created ON news_items(created_at DESC)`,
       `CREATE INDEX IF NOT EXISTS idx_news_items_source ON news_items(source)`,
     ],
+  },
+  {
+    version: "c002_news_columns",
+    description: "扩展新闻信源英文别名、分类及卡片元数据字段",
+    run: async () => {
+      const columns = await queryRows(`PRAGMA table_info(news_items)`);
+      const existing = new Set(columns.map((row: any) => String(row.name)));
+
+      const statements: string[] = [];
+      const newCols: Record<string, string> = {
+        source_name: "TEXT NOT NULL DEFAULT ''",
+        sub_type: "TEXT NOT NULL DEFAULT ''",
+        hot: "TEXT NOT NULL DEFAULT ''",
+        cover: "TEXT NOT NULL DEFAULT ''",
+        mobile_url: "TEXT NOT NULL DEFAULT ''",
+        pub_time: "TEXT NOT NULL DEFAULT ''",
+      };
+
+      for (const [col, colDef] of Object.entries(newCols)) {
+        if (!existing.has(col)) {
+          statements.push(`ALTER TABLE news_items ADD COLUMN ${col} ${colDef}`);
+        }
+      }
+
+      for (const sql of statements) {
+        await executeSql(sql);
+      }
+
+      await executeSql(
+        `CREATE INDEX IF NOT EXISTS idx_news_items_query ON news_items(source_name, sub_type, id DESC)`,
+      );
+    },
   },
 ];
 
@@ -59,7 +91,11 @@ export const runCrawlerMigrations = async (): Promise<void> => {
       if (applied.has(migration.version)) continue;
 
       const startedAt = Date.now();
-      await runBatch(migration.statements.map((sql) => ({ sql })));
+      if (migration.run) {
+        await migration.run();
+      } else if (migration.statements?.length) {
+        await runBatch(migration.statements.map((sql) => ({ sql })));
+      }
       await executeSql(
         `INSERT INTO ${LEDGER_TABLE} (version, description, applied_at) VALUES (?, ?, ?)`,
         [migration.version, migration.description, new Date().toISOString()],

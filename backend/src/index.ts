@@ -3,6 +3,7 @@ import { config } from "./config.js";
 import logger from "./utils/logger.js";
 import { initScoreDb, closeScoreDb } from "./utils/scoreDb.js";
 import { initDefaultUserBinding } from "./auth/index.js";
+import { backfillOldNewsSources } from "./utils/newsDb.js";
 import app from "./app.js";
 
 // 防止异步打分/网络请求意外异常导致服务崩溃退出
@@ -37,6 +38,7 @@ const serveHotApi = async (port: number = config.PORT) => {
     // 数据库迁移失败必须直接退出，避免带着半成品表结构对外服务
     await initScoreDb();
     await initDefaultUserBinding();
+    await backfillOldNewsSources();
 
     const apiServer = serve({
       fetch: app.fetch,

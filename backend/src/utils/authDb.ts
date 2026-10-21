@@ -276,7 +276,7 @@ export const countRecentNonces = async (address: string, windowSeconds = 60): Pr
 };
 
 /**
- * 查询用户全部身份（供 /auth/me 展示可绑定渠道）
+ * 查询用户全部身份（供 /account/profile 展示可绑定渠道）
  */
 export const listIdentitiesByUser = async (userId: number): Promise<AuthIdentityRow[]> => {
   const rows = await queryRows(

@@ -98,19 +98,26 @@ deploy_frontend() {
   ok "前端已更新"
 }
 
+# 等待某个路径返回预期状态码（PM2 重启后端口需要几百毫秒才就绪，避免误判 502）
+expect_code() {
+  local path="$1" expect="$2" label="$3" tries=15 code=""
+  for _ in $(seq 1 "$tries"); do
+    code=$(curl -s -o /dev/null -w '%{http_code}' -m 5 "$SITE$path")
+    if [ "$code" = "$expect" ]; then
+      return 0
+    fi
+    sleep 1
+  done
+  fail "${label} 返回 ${code}（应为 ${expect}）"
+}
+
 health_check() {
   info "健康检查"
-  local providers score feed
-  providers=$(curl -s -o /dev/null -w '%{http_code}' -m 10 "$SITE/api/auth/providers")
-  [ "$providers" = "200" ] || fail "/api/auth/providers 返回 $providers（应为 200）"
+  expect_code "/api/auth/providers" "200" "/api/auth/providers"
+  expect_code "/api/score" "401" "/api/score（鉴权未生效）"
+  expect_code "/api/bilibili?limit=1" "200" "/api/bilibili"
 
-  score=$(curl -s -o /dev/null -w '%{http_code}' -m 10 "$SITE/api/score")
-  [ "$score" = "401" ] || fail "/api/score 返回 $score（应为 401，说明鉴权未生效）"
-
-  feed=$(curl -s -o /dev/null -w '%{http_code}' -m 10 "$SITE/feed/all")
-  [ "$feed" = "200" ] || fail "/feed/all 返回 $feed（应为 200）"
-
-  ok "站点 $SITE 正常（/api 200，/api/score 401 已锁定，/feed/all 200）"
+  ok "站点 $SITE 正常（/api/auth 200，/api/score 401 已锁定，/api/bilibili 200 数据库新闻供给就绪）"
 }
 
 case "$TARGET" in

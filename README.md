@@ -98,33 +98,34 @@ AI 之后重算，也**不会覆盖你的判断**。改得越多，这条流越�
 
 ## 三步启动
 
-项目由三个平级目录组成：`crawler/`（抓取 + 翻译 + 入库）、`backend/`（用户、评分、Prompt）、`frontend/`。
+项目由三个平级目录组成：`backend/`（统一 HTTP API：新闻只读供给、用户、评分、Prompt）、`frontend/`（看板界面）、`crawler/`（离线/定时调度器，抓取 + 汉化 + 入库，可部署于家用宽带机）。
 
-终端 1 · 爬虫服务（`:6688`）：
-
-```bash
-cd crawler
-pnpm install
-cp .env.example .env      # 填入 DEEPSEEK_API_KEY 与数据库配置
-pnpm dev
-```
-
-终端 2 · 用户服务（`:6690`）：
+终端 1 · 用户与新闻后端服务（`:6690`）：
 
 ```bash
 cd backend
 pnpm install
-cp .env.example .env      # 与爬虫指向同一个数据库，另需 AUTH_JWT_SECRET
+cp .env.example .env      # 填入数据库配置与 AUTH_JWT_SECRET
 pnpm dev
 ```
 
-终端 3 · 前端（`:6699`）：
+终端 2 · 前端界面（`:6699`）：
 
 ```bash
 cd frontend
 pnpm install
-cp .env.example .env      # 默认：榜单→6688，账户/评分→6690
+cp .env.example .env      # 统一请求后端 :6690
 pnpm dev
+```
+
+终端 3（可选/家用宽带机）· 爬虫定时调度器（无 HTTP 端口）：
+
+```bash
+cd crawler
+pnpm install
+cp .env.example .env      # 与后端指向同一个数据库 (LIBSQL_URL)，填入 DEEPSEEK_API_KEY
+pnpm crawl cls            # 单次测试抓取财联社
+pnpm crawl:daemon         # 启动常驻定时轮询调度
 ```
 
 打开 `http://localhost:6699` 即可。需要 **Node.js ≥ 22.5**；没有 DeepSeek Key 也能浏览信源，只是拿不到评分与翻译。

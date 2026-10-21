@@ -105,8 +105,6 @@
         </n-space>
       </n-card>
     </template>
-
-    <LoginModal ref="loginModalRef" />
   </div>
 </template>
 
@@ -114,6 +112,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
 import { useAuthStore } from "@/store/auth";
+import { AUTH_EVENTS, emitAuthEvent } from "@/utils/authEvents";
 import {
   getAccountProfile,
   getAccountPrompt,
@@ -121,12 +120,9 @@ import {
   testAccountPrompt,
   updateAccountPrompt,
 } from "@/api/auth";
-import LoginModal from "@/components/Auth/LoginModal.vue";
 
 const authStore = useAuthStore();
 const { isAuthed } = storeToRefs(authStore);
-
-const loginModalRef = ref(null);
 
 const profile = ref({});
 const promptText = ref("");
@@ -141,7 +137,7 @@ const testResult = ref(null);
 
 const dirty = computed(() => promptText.value !== savedPrompt.value);
 
-const openLogin = () => loginModalRef.value?.open?.();
+const openLogin = () => emitAuthEvent(AUTH_EVENTS.OPEN_LOGIN);
 
 const formatDate = (value) => {
   if (!value) return "-";

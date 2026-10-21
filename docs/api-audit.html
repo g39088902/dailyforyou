@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>DailyForYou · API 现状核对</title>
+<style>
+  :root{
+    --bg:#f7f8fa;
+    --card:#ffffff;
+    --ink:#15181d;
+    --ink-2:#3b4250;
+    --muted:#6b7280;
+    --faint:#9aa1ad;
+    --line:#e7e9ee;
+    --line-2:#eef0f4;
+    --accent:#2f6fed;
+    --green:#15803d; --green-bg:#ecfdf3; --green-line:#bbf7d0;
+    --amber:#b45309; --amber-bg:#fffbeb; --amber-line:#fde68a;
+    --blue:#1d4ed8;  --blue-bg:#eff6ff;  --blue-line:#bfdbfe;
+    --violet:#6d28d9;--violet-bg:#f5f3ff;--violet-line:#ddd6fe;
+    --slate:#475569; --slate-bg:#f1f5f9;
+    --radius:14px;
+    --shadow:0 1px 2px rgba(16,24,40,.04), 0 8px 24px -12px rgba(16,24,40,.10);
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",system-ui,sans-serif;
+    font-size:14px;line-height:1.62;
+    -webkit-font-smoothing:antialiased;
+  }
+  code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;font-variant-ligatures:none}
+  .wrap{max-width:1180px;margin:0 auto;padding:40px 24px 80px}
+
+  /* ---------- hero ---------- */
+  .eyebrow{display:inline-flex;align-items:center;gap:8px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);font-weight:600}
+  .eyebrow::before{content:"";width:18px;height:2px;background:var(--accent);border-radius:2px}
+  h1{font-size:30px;line-height:1.28;letter-spacing:-.02em;margin:12px 0 10px;font-weight:700}
+  .lede{max-width:760px;color:var(--ink-2);font-size:15px;margin:0}
+  .meta{margin-top:16px;display:flex;flex-wrap:wrap;gap:8px;color:var(--muted);font-size:12.5px}
+  .meta span{background:#fff;border:1px solid var(--line);border-radius:999px;padding:3px 10px}
+  .meta b{color:var(--ink-2);font-weight:600}
+
+  /* ---------- kpi ---------- */
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:26px 0 14px}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:16px 16px 14px;box-shadow:var(--shadow);position:relative;overflow:hidden}
+  .kpi::after{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--accent);opacity:.8}
+  .kpi.k-green::after{background:var(--green)} .kpi.k-amber::after{background:var(--amber)}
+  .kpi.k-violet::after{background:var(--violet)}
+  .kpi .n{font-size:28px;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1.2}
+  .kpi .n small{font-size:13px;font-weight:500;color:var(--faint);margin-left:4px;vertical-align:3px}
+  .kpi .t{color:var(--muted);font-size:12.5px;margin-top:2px}
+  .kpi .s{margin-top:8px;font-size:11.5px;color:var(--faint)}
+
+  /* ---------- coverage bar ---------- */
+  .bar{display:flex;height:12px;border-radius:999px;overflow:hidden;background:#eceef2;border:1px solid var(--line)}
+  .bar i{display:block;height:100%}
+  .bar .b1{background:#34a06a}.bar .b2{background:#e6a23c}.bar .b3{background:#7aa7f5}.bar .b4{background:#b7a6f0}
+  .legend{display:flex;flex-wrap:wrap;gap:16px;margin-top:10px;font-size:12px;color:var(--muted)}
+  .legend b{color:var(--ink-2)}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:3px;margin-right:6px;vertical-align:1px}
+
+  /* ---------- toolbar ---------- */
+  .toolbar{
+    position:sticky;top:0;z-index:20;margin:26px -8px 18px;padding:10px 8px;
+    background:rgba(247,248,250,.86);backdrop-filter:blur(10px);
+    border-bottom:1px solid transparent;display:flex;flex-wrap:wrap;gap:10px;align-items:center;
+  }
+  .search{flex:1 1 220px;min-width:180px;position:relative}
+  .search input{
+    width:100%;padding:9px 12px 9px 32px;border:1px solid var(--line);border-radius:10px;background:#fff;
+    font-size:13px;color:var(--ink);outline:none;transition:.15s;
+  }
+  .search input:focus{border-color:#c3d4f7;box-shadow:0 0 0 3px rgba(47,111,237,.10)}
+  .search svg{position:absolute;left:11px;top:50%;transform:translateY(-50%);width:14px;height:14px;color:var(--faint)}
+  .chips{display:flex;flex-wrap:wrap;gap:6px}
+  .chip{
+    border:1px solid var(--line);background:#fff;color:var(--ink-2);border-radius:999px;
+    padding:6px 12px;font-size:12.5px;cursor:pointer;transition:.15s;font-family:inherit;
+  }
+  .chip:hover{border-color:#cfd6e2}
+  .chip[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:#fff}
+  .chip .c{opacity:.55;margin-left:4px;font-variant-numeric:tabular-nums}
+
+  /* ---------- sections ---------- */
+  .group{margin:26px 0 30px;background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);overflow:hidden}
+  .group-h{display:flex;align-items:baseline;gap:12px;padding:16px 18px 12px;border-bottom:1px solid var(--line-2)}
+  .group-h h2{margin:0;font-size:15.5px;font-weight:650;letter-spacing:-.01em}
+  .group-h .gid{font-size:11px;color:var(--faint);letter-spacing:.1em;font-weight:600}
+  .group-h .note{margin-left:auto;font-size:12px;color:var(--muted)}
+  .colhead,.row{display:grid;grid-template-columns:minmax(240px,1.5fr) 108px 128px minmax(190px,1.15fr);gap:14px;align-items:start}
+  .colhead{padding:9px 18px;background:#fbfcfd;border-bottom:1px solid var(--line-2);font-size:11px;letter-spacing:.06em;color:var(--faint);font-weight:600}
+  .row{padding:14px 18px;border-bottom:1px solid var(--line-2);border-left:3px solid transparent;transition:background .12s}
+  .row:last-child{border-bottom:none}
+  .row:hover{background:#fcfdff}
+  .row[data-status="done"]{border-left-color:#34a06a}
+  .row[data-status="backend"]{border-left-color:#e6a23c}
+  .row[data-status="placeholder"]{border-left-color:#7aa7f5}
+  .row[data-status="planned"]{border-left-color:#b7a6f0}
+
+  .ep{display:flex;flex-wrap:wrap;align-items:center;gap:7px}
+  .method{font-size:10.5px;font-weight:700;letter-spacing:.04em;padding:2px 6px;border-radius:5px;border:1px solid transparent;font-family:ui-monospace,Menlo,monospace}
+  .m-get{color:#1d4ed8;background:#eff6ff;border-color:#dbeafe}
+  .m-post{color:#047857;background:#ecfdf5;border-color:#d1fae5}
+  .m-put{color:#b45309;background:#fffbeb;border-color:#fde68a}
+  .m-patch{color:#6d28d9;background:#f5f3ff;border-color:#ede9fe}
+  .m-mix{color:#475569;background:#f1f5f9;border-color:#e2e8f0}
+  .path{font-size:13px;font-weight:600;color:var(--ink);background:transparent;padding:0}
+  .alias{font-size:11.5px;color:var(--faint);font-weight:400}
+  .desc{margin-top:4px;font-size:12.5px;color:var(--muted);line-height:1.55}
+
+  .tag{display:inline-block;font-size:11.5px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted);background:#fafbfc;white-space:nowrap}
+  .tag.warn{color:var(--amber);background:var(--amber-bg);border-color:var(--amber-line)}
+  .tag.info{color:var(--blue);background:var(--blue-bg);border-color:var(--blue-line)}
+
+  .state{display:flex;gap:7px;font-size:12.5px;line-height:1.45}
+  .state .sdot{flex:0 0 auto;width:7px;height:7px;border-radius:50%;margin-top:6px}
+  .s-done{background:#34a06a}.s-backend{background:#e6a23c}.s-plan{background:#b7a6f0}.s-place{background:#7aa7f5}
+  .state .txt b{font-weight:600}
+  .state .txt span{display:block;color:var(--faint);font-size:11.5px;margin-top:1px}
+  .ref{color:var(--faint);font-size:11.5px;margin-top:1px}
+  .ref code{background:#f6f7f9;border:1px solid var(--line-2);border-radius:4px;padding:0 4px;font-size:11px}
+
+  .hide{display:none !important}
+  .empty{margin:40px 0;text-align:center;color:var(--faint);font-size:13px}
+
+  /* ---------- findings ---------- */
+  .findings{margin-top:34px}
+  .findings > h2{font-size:18px;letter-spacing:-.01em;margin:0 0 4px}
+  .findings > p.sub{margin:0 0 16px;color:var(--muted);font-size:13px}
+  .find{display:grid;grid-template-columns:26px 1fr;gap:14px;padding:16px 18px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);margin-bottom:10px}
+  .find .idx{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--faint);padding-top:2px}
+  .find h3{margin:0 0 4px;font-size:14px;font-weight:650;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  .find p{margin:0;color:var(--ink-2);font-size:13px}
+  .find code{background:#f6f7f9;border:1px solid var(--line-2);border-radius:4px;padding:0 4px;font-size:12px}
+  .sev{font-size:10.5px;font-weight:700;letter-spacing:.04em;padding:2px 7px;border-radius:5px}
+  .sev.p0{color:#b91c1c;background:#fef2f2;border:1px solid #fecaca}
+  .sev.p1{color:#b45309;background:#fffbeb;border:1px solid #fde68a}
+  .sev.p2{color:#475569;background:#f1f5f9;border:1px solid #e2e8f0}
+
+  footer{margin-top:38px;padding-top:18px;border-top:1px solid var(--line);color:var(--faint);font-size:12px}
+  footer b{color:var(--muted);font-weight:600}
+  footer ul{margin:8px 0 0;padding-left:18px}
+  footer li{margin:2px 0}
+
+  @media (max-width:900px){
+    .wrap{padding:28px 16px 60px}
+    h1{font-size:24px}
+    .kpis{grid-template-columns:repeat(2,1fr)}
+    .colhead{display:none}
+    .row{grid-template-columns:1fr;gap:8px;padding:14px 16px}
+    .row > div[data-col]::before{content:attr(data-col) "：";color:var(--faint);font-size:11px}
+    .row > div[data-col="ep"]::before{content:none}
+  }
+  @media print{
+    body{background:#fff}
+    .toolbar{display:none}
+    .group,.kpi,.find{box-shadow:none}
+    .row,.find{break-inside:avoid}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="eyebrow">技术文档 · 接口盘点</div>
+    <h1>DailyForYou API 现状核对</h1>
+    <p class="lede">
+      把「后端已经注册的路由」「契约文档里规划但还没写的接口」「前端真正调用到的接口」三条线逐条对齐，
+      一眼看出哪些已经跑通、哪些只是写完了没人用、哪些还停留在设计稿里。
+    </p>
+    <div class="meta">
+      <span>基线 <b>workspace @ main</b></span>
+      <span>核对时间 <b>2026-10-21 09:14</b></span>
+      <span>扫描范围 <b>crawler / backend / frontend</b></span>
+      <span>对外前缀 <b>/api</b> · <b>/feed</b> → backend:6690</span>
+    </div>
+  </header>
+
+  <section class="kpis" aria-label="概览指标">
+    <div class="kpi">
+      <div class="n">20<small>条</small></div>
+      <div class="t">后端已实现端点</div>
+      <div class="s">含 2 条 501 占位 · 18 条真实可用</div>
+    </div>
+    <div class="kpi k-green">
+      <div class="n">16<small>/ 20</small></div>
+      <div class="t">已被前端对接</div>
+      <div class="s">覆盖率 80% · 15 个封装在用</div>
+    </div>
+    <div class="kpi k-amber">
+      <div class="n">4<small>条</small></div>
+      <div class="t">后端有、前端没用</div>
+      <div class="s">2 条能力闲置 + 2 条占位</div>
+    </div>
+    <div class="kpi k-violet">
+      <div class="n">6<small>条</small></div>
+      <div class="t">契约规划未落地</div>
+      <div class="s">3 个 P0 端点 + 3 项行为变更</div>
+    </div>
+  </section>
+
+  <div class="bar" role="img" aria-label="26 条接口的落地状态分布">
+    <i class="b1" style="width:61.5%"></i><i class="b2" style="width:7.7%"></i><i class="b3" style="width:7.7%"></i><i class="b4" style="width:23.1%"></i>
+  </div>
+  <div class="legend">
+    <span><i class="dot" style="background:#34a06a"></i><b>16</b> 已对接</span>
+    <span><i class="dot" style="background:#e6a23c"></i><b>2</b> 仅后端</span>
+    <span><i class="dot" style="background:#7aa7f5"></i><b>2</b> 501 占位</span>
+    <span><i class="dot" style="background:#b7a6f0"></i><b>6</b> 规划中</span>
+    <span style="margin-left:auto">共 <b>26</b> 条（20 已实现 + 6 规划）</span>
+  </div>
+
+  <div class="toolbar">
+    <label class="search">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+      <input id="q" type="search" placeholder="搜索路径、说明、调用文件…" autocomplete="off" />
+    </label>
+    <div class="chips" role="group" aria-label="按状态过滤">
+      <button class="chip" data-status="all" aria-pressed="true">全部<span class="c">26</span></button>
+      <button class="chip" data-status="done" aria-pressed="false">已对接<span class="c">16</span></button>
+      <button class="chip" data-status="backend" aria-pressed="false">仅后端<span class="c">2</span></button>
+      <button class="chip" data-status="placeholder" aria-pressed="false">占位<span class="c">2</span></button>
+      <button class="chip" data-status="planned" aria-pressed="false">规划中<span class="c">6</span></button>
+    </div>
+  </div>
+
+  <main>
+
+    <!-- ================= 资讯供给 ================= -->
+    <section class="group" id="feed">
+      <div class="group-h">
+        <span class="gid">01</span>
+        <h2>资讯供给</h2>
+        <span class="note">公开只读 · 数据源 news_items（爬虫写、后端读）</span>
+      </div>
+      <div class="colhead"><div>接口</div><div>鉴权</div><div>后端</div><div>前端对接</div></div>
+
+      <article class="row" data-status="done" data-search="get /:source 单信源资讯 news_items type limit getHotLists api/index.js List.vue useStreamSources">
+        <div data-col="ep">
+          <div class="ep"><span class="method m-get">GET</span><code class="path">/:source</code></div>
+          <div class="desc">按信源读库返回资讯；<code>?type=</code> 指定子类型，<code>?limit=</code> 默认 30、上限 100。全站最热路径。</div>
+        </div>
+        <div data-col="鉴权"><span class="tag">公开</span></div>
+        <div data-col="后端">
+          <div class="state"><i class="sdot s-done"></i><div class="txt"><b>已实现</b><span class="ref"><code>routes/news.ts:58</code></span></div></div>
+        </div>
+        <div data-col="前端">
+          <div class="state"><i class="sdot s-done"></i><div class="txt"><b>已对接</b><span class="ref"><code>api/index.js:14</code> getHotLists</span></div></div>
+          <div class="ref">List.vue · useStreamSources.js:85</div>
+          <div class="ref" style="color:#b45309">仍带 5 个前缀白名单，契约要求删</div>
+        </div>
+      </article>
+
+      <article class="row" data-status="backend" data-search="get /news/:source 别名 等價 newsRouter">
+        <div data-col="ep">
+          <div class="ep"><span class="method m-get">GET</span><code class="path">/news/:source</code></div>
+          <div class="desc">与 <code>/:source</code> 等价的兼容别名，方便带命名空间的调用方。</div>
+        </div>
+        <div data-col="鉴权"><span class="tag">公开</span></div>
+        <div data-col="后端">
+          <div class="state"><i class="sdot s-done"></i><div class="txt"><b>已实现</b><span class="ref"><code>routes/news.ts:57</code></span></div></div>
+        </div>
+        <div data-col="前端">
+          <div class="state"><i class="sdot s-backend"></i><div class="txt"><b>未使用</b><span class="ref">无封装、无调用方</span></div></div>
+          <div class="ref">仅作为历史兼容保留</div>
+        </div>
+      </article>
+    </section>
+
+    <!-- ================= 鉴权 ================= -->
+    <section class="group" id="auth">
+      <div class="group-h">
+        <span class="gid">02</span>
+        <h2>鉴权</h2>
+        <span class="note">SIWE 钱包签名 → JWT · 两种第三方渠道为占位</span>
+      </div>
+      <div class="colhead"><div>接口</div><div>鉴权</div><div>后端</div><div>前端对接</div></div>
+
+      <article class="row" data-status="done" data-search="get /auth/providers 登录渠道 ethereum wechat phone LoginModal">
+        <div data-col="ep">
+          <div class="ep"><span class="method m-get">GET</span><code class="path">/auth/providers</code></div>
+          <div class="desc">可用登录渠道与状态，前端据此渲染置灰入口。</div>
+        </div>
+        <div data-col="鉴权"><span class="tag">公开</span></div>
+        <div data-col="后端">
+          <div class="state"><i class="sdot s-done"></i><div class="txt"><b>已实现</b><span class="ref"><code>auth/index.ts:57</code></span></div></div>
+        </div>
+        <div data-col="前端">
+          <div class="state"><i class="sdot s-done"></i><div class="txt"><b>已对接</b><span class="ref"><code>api/auth.js:6</code></span></div></div>
+          <div class="ref">LoginModal.vue:80</div>
+        </div>
+      </article>
+
+      <article class="row" data-status="done" data-search="post /auth/nonce siwe 挑战 nonce 限流 LoginModal">
+        <div data-col="ep">
+          <div class="ep"><span class="method m-post">POST</span><code class="path">/auth/nonce</code></div>
+          <div class="desc">申请一次性签名挑战，返回标准 SIWE message（默认 300s TTL）。</div>
+        </div>
+        <div data-col="鉴权"><span class="tag warn">公开 · IP+地址限流</span></div>
+        <div data-col="后端">
+          <div class="state"><i class="sdot s-done"></i><div class="txt"><b>已实现</b><span class="ref"><code>auth/index.ts:64</code></span></div></div>
+        </div>
+        <div data-col="前端">
+          <div class="state"><i class="sdot s-done"></i><div class="txt"><b>已对接</b><span class="ref"><code>api/auth.js:18</code></span></div></div>
+          <div class="ref">LoginModal.vue:105</div>
+        </div>
+      </article>
+
+      <article class="row" data-status="done" data-search="post /auth/verify 验签 jwt viem LoginModal">
+        <div data-col="ep">
+          <div class="ep"><span class="method m-post">POST</span><code class="path">/auth/verify</code></div>
+          <div class="desc">viem <code>verifyMessage</code> 验签，消费 nonce，签发 JWT（默认 7 天）。</div>
+        </div>
+        <div data-col="鉴权"><span class="tag">公开</span></div>
+        <div data-col="后端">
+          <div class="state"><i class="sdot s-done"></i><div class="txt"><b>已实现</b><span class="ref"><code>auth/index.ts:130</code></span></div></div>
+        </div>
+        <div data-col="前端">
+          <div class="state"><i class="sdot s-done"></i><div class="txt"><b>已对接</b><span class="ref"><code>api/auth.js:30</code></span></div></div>
+          <div class="ref">LoginModal.vue:112</div>
+        </div>
+      </article>
+
+      <article class="row" data-status="done" data-search="post /auth/logout 退出 AccountEntry 无状态">
+        <div data-col="ep">
+          <div class="ep"><span class="method m-post">POST</span><code class="path">/auth/logout</code></div>
+          <div class="desc">JWT 无状态，服务端仅返回 200；黑名单留待将来。</div>
+        </div>
+        <div data-col="鉴权"><span class="tag">公开</span></div>
+        <div data-col="后端">
+          <div class="state"><i class="sdot s-done"></i><div class="txt"><b>已实现</b><span class="ref"><code>auth/index.ts:227</code></span></div></div>
+        </div>
+        <div data-col="前端">
+          <div class="state"><i class="sdot s-done"></i><div class="txt"><b>已对接</b><span class="ref"><code>api/auth.js:46</code></span></div></div>
+          <div class="ref">AccountEntry.vue:76</div>
+        </div>
+      </article>
+
+      <article class="row" data-status="placeholder" data-search="post /auth/wechat/challenge 微信 扫码 501 占位 provider_not_implemented">
+        <div data-col="ep">
+          <div class="ep"><span class="method m-post">POST</span><code class="path">/auth/wechat/challenge</code></div>
+          <div class="desc">预留渠道，固定返回 <code>501 provider_not_implemented</code>。</div>
+        </div>
+        <div data-col="鉴权"><span class="tag">公开</span></div>
+        <div data-col="后端">
+          <div class="state"><i class="sdot s-place"></i><div class="txt"><b>501 占位</b><span class="ref"><code>auth/index.ts:232</code></span></div></div>
+        </div>
+        <div data-col="前端">
+          <div class="state"><i class="sdot s-backend"></i><div class="txt"><b>不调用</b><span class="ref">按 providers.enabled 置灰</span></div></div>
+          <div class="ref">无封装</div>
+        </div>
+      </article>
+
+      <article class="row" data-status="placeholder" data-search="post /auth/phone/verify 手机号 短信 501 占位">
+        <div data-col="ep">
+          <div class="ep"><span class="method m-post">POST</span><code class="path">/auth/phone/verify</code></div>
+          <div class="desc">预留渠道，固定返回 <code>501 provider_not_implemented</code>。</div>
+        </div>
+        <div data-col="鉴权"><span class="tag">公开</span></div>
+        <div data-col="后端">
+          <div class="state"><i class="sdot s-place"></i><div class="txt"><b>501 占位</b><span class="ref"><code>auth/index.ts:252</code></span></div></div>
+        </div>
+        <div data-col="前端">
+          <div class="state"><i class="sdot s-backend"></i><div class="txt"><b>不调用</b><span class="ref">按 providers.enabled 置灰</span></div></div>
+          <div class="ref">无封装</div>
+        </div>
+      </article>
+    </section>
+
+    <!-- ================= 账户与 Prompt ================= -->
+    <section class="group" id="account">
+      <div class="group-h">
+        <span class="gid">03</span>
+        <h2>账户与 Prompt</h2>
+        <span class="note">全部 Bearer · 每用户 Prompt 决定评分缓存键</span>
+      </div>
+      <div class="colhead"><div>接口</div><div>鉴权</div><div>后端</div><div>前端对接</div></div>
+
+      <article class="row" data-status="done" data-search="get /account/profile 账户概览 identities prompt Account.vue">
+        <div data-col="ep">
+          <div class="ep"><span class="method m-get">GET</span><code class="path">/account/profile</code></div>
+          <div class="desc">账户概览：显示名、创建时间、已绑定身份、Prompt 元信息。</div>
+        </div>
+        <div data-col="鉴权"><span class="tag info">Bearer</span></div>
+        <div data-col="后端">
+          <div class="state"><i class="sdot s-done"></i><div class="txt"><b>已实现</b><span class="ref"><code>api/account.ts:36</code></span></div></div>
+        </div>
+        <div data-col="前端">
+          <div class="state"><i class="sdot s-done"></i><div class="txt"><b>已对接</b><span class="ref"><code>api/auth.js:53</code></span></div></div>
+          <div class="ref">Account.vue:162</div>
+        </div>
+      </article>
+
+      <article class="row" data-status="done" data-search="get /account/prompt 读取 prompt hash maxLength Account.vue">
+        <div data-col="ep">
+          <div class="ep"><span class="method m-get">GET</span><code class="path">/account/prompt</code></div>
+          <div class="desc">读当前 Prompt 全文、<code>promptHash</code>、是否默认、长度上限。</div>
+        </div>
+        <div data-col="鉴权"><span class="tag info">Bearer</span></div>
+        <div data-col="后端">
+          <div class="state"><i class="sdot s-done"></i><div class="txt"><b>已实现</b><span class="ref"><code>api/account.ts:79</code></span></div></div>
+        </div>
+        <div data-col="前端">
+          <div class="state"><i class="sdot s-done"></i><div class="txt"><b>已对接</b><span class="ref"><code>api/auth.js:60</code></span></div></div>
+          <div class="ref">Account.vue:161</div>
+        </div>
+      </article>
+
+      <article class="row" data-status="done" data-search="put /account/prompt 保存 自定义 校验 warnings Account.vue">
+        <div data-col="ep">
+          <div class="ep"><span class="method m-put">PUT</span><code class="path">/account/prompt</code></div>
+          <div class="desc">保存自定义 Prompt，长度/结构校验，返回 warnings；写库即换 <code>promptHash</code>。</div>
+        </div>
+        <div data-col="鉴权"><span class="tag info">Bearer</span></div>
+        <div data-col="后端">
+          <div class="state"><i class="sdot s-done"></i><div class="txt"><b>已实现</b><span class="ref"><code>api/account.ts:105</code></span></div></div>
+        </div>
+        <div data-col="前端">
+          <div class="state"><i class="sdot s-done"></i><div class="txt"><b>已对接</b><span class="ref"><code>api/auth.js:71</code></span></div></div>
+          <div class="ref">Account.vue:183</div>
+        </div>
+      </article>
+
+      <article class="row" data-status="done" data-search="post /account/prompt/reset 重置 默认 Account.vue">
+        <div data-col="ep">
+          <div class="ep"><span class="method m-post">POST</span><code class="path">/account/prompt/reset</code></div>
+          <div class="desc">重置为系统默认 Prompt，清空个人覆盖。</div>
+        </div>
+        <div data-col="鉴权"><span class="tag info">Bearer</span></div>
+        <div data-col="后端">
+          <div class="state"><i class="sdot s-done"></i><div class="txt"><b>已实现</b><span class="ref"><code>api/account.ts:142</code></span></div></div>
+        </div>
+        <div data-col="前端">
+          <div class="state"><i class="sdot s-done"></i><div class="txt"><b>已对接</b><span class="ref"><code>api/auth.js:80</code></span></div></div>
+          <div class="ref">Account.vue:204</div>
+        </div>
+      </article>
+
+      <article class="row" data-status="done" data-search="post /account/prompt/test 试跑 不落库 限流 Account.vue">
+        <div data-col="ep">
+          <div class="ep"><span class="method m-post">POST</span><code class="path">/account/prompt/test</code></div>
+          <div class="desc">用样例试跑 Prompt，不写库、不影响已有评分；25s 超时 + 按用户限流。</div>
+        </div>
+        <div data-col="鉴权"><span class="tag warn">Bearer · 限流</span></div>
+        <div data-col="后端">
+          <div class="state"><i class="sdot s-done"></i><div class="txt"><b>已实现</b><span class="ref"><code>api/account.ts:167</code></span></div></div>
+        </div>
+        <div data-col="前端">
+          <div class="state"><i class="sdot s-done"></i><div class="txt"><b>已对接</b><span class="ref"><code>api/auth.js:91</code></span></div></div>
+          <div class="ref">Account.vue:220</div>
+        </div>
+      </article>
+    </section>
+
+    <!-- ================= 评分与已读 ================= -->
+    <section class="group" id="score">
+      <div class="group-h">
+        <span class="gid">04</span>
+        <h2>评分与已读</h2>
+        <span class="note">全部 Bearer · <code>/score*</code> 中间件在处理器之前注册</span>
+      </div>
+      <div class="colhead"><div>接口</div><div>鉴权</div><div>后端</div><div>前端对接</div></div>
+
+      <article class="row" data-status="done" data-search="get /score 单条 评分 缓存 useStreamScoring">
+        <div data-col="ep">
+          <div class="ep"><span class="method m-get">GET</span><code class="path">/score</code></div>
+          <div class="desc">单条评分（query 传 title/desc/source），优先命中缓存；<code>?force</code> 强制重算。</div>
+        </div>
+        <div data-col="鉴权"><span class="tag warn">Bearer · 限流</span></div>
+        <div data-col="后端">
+          <div class="state"><i class="sdot s-done"></i><div class="txt"><b>已实现</b><span class="ref"><code>registry.ts:68</code></span></div></div>
+        </div>
+        <div data-col="前端">
+          <div class="state"><i class="sdot s-done"></i><div class="txt"><b>已对接</b><span class="ref"><code>api/index.js:43</code> scoreNews</span></div></div>
+          <div class="ref">useStreamScoring.js:175</div>
+        </div>
+      </article>
+
+      <article class="row" data-status="done" data-search="post /score 批量 sort force cacheOnly concurrency useStreamScoring">
+        <div data-col="ep">
+          <div class="ep"><span class="method m-post">POST</span><code class="path">/score</code></div>
+          <div class="desc">单条或批量评分，支持 <code>sort</code> / <code>force</code> / <code>cacheOnly</code> / <code>concurrency</code>。</div>
+        </div>
+        <div data-col="鉴权"><span class="tag warn">Bearer · 限流</span></div>
+        <div data-col="后端">
+          <div class="state"><i class="sdot s-done"></i><div class="txt"><b>已实现</b><span class="ref"><code>registry.ts:112</code></span></div></div>
+        </div>
+        <div data-col="前端">
+          <div class="state"><i class="sdot s-done"></i><div class="txt"><b>已对接</b><span class="ref"><code>api/index.js:43</code> 批量分支</span></div></div>
+          <div class="ref">useStreamScoring.js:175</div>
+        </div>
+      </article>
+
+      <article class="row" data-status="done" data-search="post /score/cache 缓存 批量 毫秒 useStreamScoring">
+        <div data-col="ep">
+          <div class="ep"><span class="method m-post">POST</span><code class="path">/score/cache</code></div>
+          <div class="desc">只查已缓存评分，毫秒级返回，绝不触发 AI 调用。</div>
+        </div>
+        <div data-col="鉴权"><span class="tag info">Bearer</span></div>
+        <div data-col="后端">
+          <div class="state"><i class="sdot s-done"></i><div class="txt"><b>已实现</b><span class="ref"><code>registry.ts:207</code></span></div></div>
+        </div>
+        <div data-col="前端">
+          <div class="state"><i class="sdot s-done"></i><div class="txt"><b>已对接</b><span class="ref"><code>api/index.js:81</code></span></div></div>
+          <div class="ref">useStreamScoring.js:258</div>
+        </div>
+      </article>
+
+      <article class="row" data-status="done" data-search="post put patch /score/manual feedback 手动修正 重置 别名 useStreamScoring">
+        <div data-col="ep">
+          <div class="ep"><span class="method m-post">POST</span><span class="method m-put">PUT</span><span class="method m-patch">PATCH</span><code class="path">/score/manual</code></div>
+          <div class="desc">手动修正/重置评分，支持批量。同一处理器另有 <code>/score/feedback</code> 与 <code>PUT|PATCH /score</code> 共 6 个入口。</div>
+        </div>
+        <div data-col="鉴权"><span class="tag info">Bearer</span></div>
+        <div data-col="后端">
+          <div class="state"><i class="sdot s-done"></i><div class="txt"><b>已实现</b><span class="ref"><code>registry.ts:295-300</code></span></div></div>
+        </div>
+        <div data-col="前端">
+          <div class="state"><i class="sdot s-done"></i><div class="txt"><b>已对接（仅 POST）</b><span class="ref"><code>api/index.js:96</code></span></div></div>
+          <div class="ref">useStreamScoring.js:347</div>
+        </div>
+      </article>
+
+      <article class="row" data-status="done" data-search="post /score/read 已读 未读 批量 useStreamReadStatus">
+        <div data-col="ep">
+          <div class="ep"><span class="method m-post">POST</span><span class="method m-put">PUT</span><span class="method m-patch">PATCH</span><code class="path">/score/read</code></div>
+          <div class="desc">标记已读/未读，支持批量与默认值继承；单条失败被吞掉以保证批量顺畅。</div>
+        </div>
+        <div data-col="鉴权"><span class="tag info">Bearer</span></div>
+        <div data-col="后端">
+          <div class="state"><i class="sdot s-done"></i><div class="txt"><b>已实现</b><span class="ref"><code>registry.ts:364-366</code></span></div></div>
+        </div>
+        <div data-col="前端">
+          <div class="state"><i class="sdot s-done"></i><div class="txt"><b>已对接（仅 POST）</b><span class="ref"><code>api/index.js:122</code></span></div></div>
+          <div class="ref">useStreamReadStatus.js:79</div>
+        </div>
+      </article>
+
+      <article class="row" data-status="done" data-search="get /score/read 已读哈希 5000 useStreamReadStatus">
+        <div data-col="ep">
+          <div class="ep"><span class="method m-get">GET</span><code class="path">/score/read</code></div>
+          <div class="desc">拉取全量已读哈希集合（默认 5000 条），供跨端同步与过滤。</div>
+        </div>
+        <div data-col="鉴权"><span class="tag info">Bearer</span></div>
+        <div data-col="后端">
+          <div class="state"><i class="sdot s-done"></i><div class="txt"><b>已实现</b><span class="ref"><code>registry.ts:369</code></span></div></div>
+        </div>
+        <div data-col="前端">
+          <div class="state"><i class="sdot s-done"></i><div class="txt"><b>已对接</b><span class="ref"><code>api/index.js:135</code></span></div></div>
+          <div class="ref">useStreamReadStatus.js:344</div>
+        </div>
+      </article>
+
+      <article class="row" data-status="backend" data-search="get /score/records manual feedback 评分记录 查询 后台分析">
+        <div data-col="ep">
+          <div class="ep"><span class="method m-get">GET</span><code class="path">/score/records</code></div>
+          <div class="desc">分页查询评分记录，可按 <code>modified</code> / <code>read</code> / <code>source</code> 过滤。别名 <code>GET /score/manual</code>、<code>/score/feedback</code> 默认只看人工修正。</div>
+        </div>
+        <div data-col="鉴权"><span class="tag info">Bearer</span></div>
+        <div data-col="后端">
+          <div class="state"><i class="sdot s-done"></i><div class="txt"><b>已实现</b><span class="ref"><code>registry.ts:473-475</code></span></div></div>
+        </div>
+        <div data-col="前端">
+          <div class="state"><i class="sdot s-backend"></i><div class="txt"><b>已封装 · 未接线</b><span class="ref"><code>api/index.js:109</code> 无调用方</span></div></div>
+          <div class="ref">预留给后台分析 / 人工校准样本</div>
+        </div>
+      </article>
+    </section>
+
+    <!-- ================= 规划 ================= -->
+    <section class="group" id="planned">
+      <div class="group-h">
+        <span class="gid">05</span>
+        <h2>契约规划 · 尚未实现</h2>
+        <span class="note">来源 <code>docs/contracts/backend.md</code> §2–§6</span>
+      </div>
+      <div class="colhead"><div>接口</div><div>鉴权</div><div>后端</div><div>前端对接</div></div>
+
+      <article class="row" data-status="planned" data-search="get /sources 清单 状态 etag snapshot 规划 p0 initialized">
+        <div data-col="ep">
+          <div class="ep"><span class="method m-get">GET</span><code class="path">/sources</code><span class="alias">P0</span></div>
+          <div class="desc">清单 + 运行状态（enabled / stale / status / stats），ETag 304 + 60s 进程内缓存。契约里前端唯一清单来源。</div>
+        </div>
+        <div data-col="鉴权"><span class="tag">公开</span></div>
+        <div data-col="后端">
+          <div class="state"><i class="sdot s-plan"></i><div class="txt"><b>未实现</b><span class="ref">backend/src 无任何注册</span></div></div>
+          <div class="ref" style="color:#b45309">前置：crawler 需建 <code>sources</code> 表并 seed</div>
+        </div>
+        <div data-col="前端">
+          <div class="state"><i class="sdot s-backend"></i><div class="txt"><b>未对接</b><span class="ref">仍用 27 条 defaultNewsArr</span></div></div>
+          <div class="ref"><code>store/index.js:10</code></div>
+        </div>
+      </article>
+
+      <article class="row" data-status="planned" data-search="get /logo/:file 图标 三级降级 badge svg 规划 p0">
+        <div data-col="ep">
+          <div class="ep"><span class="method m-get">GET</span><code class="path">/logo/:file</code><span class="alias">P0</span></div>
+          <div class="desc">图标三级降级：<code>logo_url</code> 302 → <code>source_logos</code> bytes → 动态 SVG 文字徽标，永不裂图。</div>
+        </div>
+        <div data-col="鉴权"><span class="tag">公开</span></div>
+        <div data-col="后端">
+          <div class="state"><i class="sdot s-plan"></i><div class="txt"><b>未实现</b><span class="ref">无 <code>/logo</code> 路由</span></div></div>
+        </div>
+        <div data-col="前端">
+          <div class="state"><i class="sdot s-backend"></i><div class="txt"><b>未对接</b><span class="ref">4 处直取 <code>public/logo/{name}.png</code></span></div></div>
+          <div class="ref">32 张 png 仍在仓库内</div>
+        </div>
+      </article>
+
+      <article class="row" data-status="planned" data-search="get /health 健康 db sources crawler schema deploy 规划 p0">
+        <div data-col="ep">
+          <div class="ep"><span class="method m-get">GET</span><code class="path">/health</code><span class="alias">P0</span></div>
+          <div class="desc">返回 db 延迟、源过期/失败数、爬虫滞后分钟数、schema 版本，供 <code>deploy.sh</code> 判 <code>status=ok</code>。</div>
+        </div>
+        <div data-col="鉴权"><span class="tag">公开</span></div>
+        <div data-col="后端">
+          <div class="state"><i class="sdot s-plan"></i><div class="txt"><b>未实现</b><span class="ref">无 <code>/health</code> 路由</span></div></div>
+        </div>
+        <div data-col="前端">
+          <div class="state"><i class="sdot s-backend"></i><div class="txt"><b>未对接</b><span class="ref">非前端消费方</span></div></div>
+          <div class="ref" style="color:#b45309"><code>deploy.sh:110</code> 只断言单信源 200，看不出爬虫死活</div>
+        </div>
+      </article>
+
+      <article class="row" data-status="planned" data-search="get /:source key 字段 响应 契约 变更 规划 p0">
+        <div data-col="ep">
+          <div class="ep"><span class="method m-get">GET</span><code class="path">/:source</code><span class="alias">响应补 key</span><span class="alias">P0 变更</span></div>
+          <div class="desc">响应新增 <code>key</code>，避免前端拿 <code>name</code> 回查子类型时对不上。</div>
+        </div>
+        <div data-col="鉴权"><span class="tag">公开</span></div>
+        <div data-col="后端">
+          <div class="state"><i class="sdot s-plan"></i><div class="txt"><b>未实现</b><span class="ref">newsDb 返回仅 name/title/type</span></div></div>
+        </div>
+        <div data-col="前端">
+          <div class="state"><i class="sdot s-backend"></i><div class="txt"><b>未使用</b><span class="ref">靠 name + params 拼 URL</span></div></div>
+        </div>
+      </article>
+
+      <article class="row" data-status="planned" data-search="未知信源 404 错误语义 静默 空数组 规划 p0">
+        <div data-col="ep">
+          <div class="ep"><span class="method m-get">GET</span><code class="path">/:source</code><span class="alias">未知源 404</span><span class="alias">P0 变更</span></div>
+          <div class="desc">清单外的信源返回 <code>404 unknown source</code>，不再 200 空数组。</div>
+        </div>
+        <div data-col="鉴权"><span class="tag">公开</span></div>
+        <div data-col="后端">
+          <div class="state"><i class="sdot s-plan"></i><div class="txt"><b>未实现</b><span class="ref">兜底 meta → <code>200 + data:[]</code></span></div></div>
+        </div>
+        <div data-col="前端">
+          <div class="state"><i class="sdot s-backend"></i><div class="txt"><b>未处理</b><span class="ref">无"信源已下线"分支</span></div></div>
+          <div class="ref" style="color:#b45309">沉默失败仍在：空频道不报错</div>
+        </div>
+      </article>
+
+      <article class="row" data-status="planned" data-search="游标分页 cursor limit 30 加载更多 规划 p2">
+        <div data-col="ep">
+          <div class="ep"><span class="method m-get">GET</span><code class="path">/:source</code><span class="alias">游标分页</span><span class="alias">P2</span></div>
+          <div class="desc">支持游标翻页，替换现在的固定 <code>LIMIT 30</code>（上限 100）。</div>
+        </div>
+        <div data-col="鉴权"><span class="tag">公开</span></div>
+        <div data-col="后端">
+          <div class="state"><i class="sdot s-plan"></i><div class="txt"><b>未实现</b><span class="ref">固定 limit，无 cursor 参数</span></div></div>
+        </div>
+        <div data-col="前端">
+          <div class="state"><i class="sdot s-backend"></i><div class="txt"><b>未对接</b><span class="ref">Stream 无法加载更多</span></div></div>
+        </div>
+      </article>
+    </section>
+
+    <p class="empty hide" id="empty">没有匹配的接口，换个关键词试试。</p>
+
+    <!-- ================= 结论 ================= -->
+    <section class="findings" id="findings">
+      <h2>核对结论</h2>
+      <p class="sub">不是"接口不够多"，而是三份事实仍然各说各话：契约设计完整，实现停在 P0 之前。</p>
+
+      <div class="find">
+        <div class="idx">01</div>
+        <div>
+          <h3>P0 三个端点全部未落地 <span class="sev p0">P0</span></h3>
+          <p><code>/sources</code>、<code>/logo/:file</code>、<code>/health</code> 在 <code>backend/src</code> 中 grep 不到任何注册；crawler 侧也只有 <code>news_items</code> 与迁移账本，<code>sources</code> / <code>source_logos</code> 两张表尚未创建。契约 README 的"发布顺序"一步都还没走。</p>
+        </div>
+      </div>
+
+      <div class="find">
+        <div class="idx">02</div>
+        <div>
+          <h3>前端仍是"四份清单"原状 <span class="sev p1">P1</span></h3>
+          <p><code>store/index.js</code> 27 条 <code>defaultNewsArr</code>、<code>api/index.js</code> 的 5 个前缀白名单、<code>public/logo/</code> 32 张 png、4 处 <code>/logo/{name}.png</code> 直取——与 <code>contracts/frontend.md</code> §2 的删除清单逐条对应，一处都没动。这是 <code>/sources</code> 缺失的连带结果，不是独立欠账。</p>
+        </div>
+      </div>
+
+      <div class="find">
+        <div class="idx">03</div>
+        <div>
+          <h3>沉默失败仍未消除 <span class="sev p0">P0</span></h3>
+          <p>未知信源仍返回 <code>200 + data: []</code>（<code>newsDb.ts:147</code> 兜底 meta），前端无法区分"暂无数据"与"信源不存在"；不可用的 <code>GET /all</code> 已于 2026-10-21 删除，<code>deploy.sh</code> 改为探测单信源 200，但爬虫停摆依旧无法从健康检查看出来。</p>
+        </div>
+      </div>
+
+      <div class="find">
+        <div class="idx">04</div>
+        <div>
+          <h3>一条"已封装、未接线"的前端能力 <span class="sev p1">P1</span></h3>
+          <p><code>getScoreRecords</code>（<code>api/index.js:109</code>）有封装但零调用方，人工校准样本的查询能力闲置。登录侧的 <code>getAuthMe</code> 与后端 <code>/auth/me</code> 已于 2026-10-21 一并移除——登录态仍完全由 localStorage 决定，token 过期要等业务请求 401 才清理。</p>
+        </div>
+      </div>
+
+      <div class="find">
+        <div class="idx">05</div>
+        <div>
+          <h3>鉴权边界是清晰的 <span class="sev p2">OK</span></h3>
+          <p><code>/score</code> 与 <code>/score/*</code> 的两条 <code>requireAuth</code> 注册在所有处理器之前，实测 <code>/api/score</code> 返回 401；<code>/account/*</code> 同样锁定。资讯与登录前链路公开，符合契约。风险集中在"未实现"而非"漏鉴权"。</p>
+        </div>
+      </div>
+
+      <div class="find">
+        <div class="idx">06</div>
+        <div>
+          <h3>兼容别名可收敛 <span class="sev p2">P2</span></h3>
+          <p>手动评分有 6 个入口（<code>POST|PUT|PATCH /score/manual</code>、<code>POST /score/feedback</code>、<code>PUT|PATCH /score</code>），已读有 3 个，评分记录查询有 3 个；前端每个只用其中一个。别名层在灰度期有价值，稳定后可只保留规范路径。</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <b>核对口径</b>
+    <ul>
+      <li><b>后端</b>：全量扫描 <code>backend/src</code> 的 Hono 注册点（<code>registry.ts</code>、<code>routes/news.ts</code>、<code>auth/index.ts</code>、<code>api/account.ts</code>），按逻辑端点归并，别名在行内注明。</li>
+      <li><b>前端</b>：<code>frontend/src/api/index.js</code>（7 个封装）+ <code>api/auth.js</code>（9 个封装）逐一 grep 调用方，覆盖 <code>.vue</code> 与 composables。</li>
+      <li><b>规划</b>：<code>docs/contracts/backend.md</code> §2–§6、<code>docs/contracts/README.md</code> §7 分期表；仅统计有明确请求/响应定义的接口，不含内部函数契约。</li>
+      <li><b>爬虫</b>：<code>crawler/src</code> 无 HTTP 服务端代码，对外端点 0 个，因此不参与接口统计；它只以 <code>news_items</code> 写库与后端集成。</li>
+    </ul>
+    <p style="margin-top:12px">生成于 2026-10-21 · DailyForYou 技术文档 · 数据以当前工作区代码为准</p>
+  </footer>
+</div>
+
+<script>
+  (function () {
+    var chips = Array.prototype.slice.call(document.querySelectorAll('.chip'));
+    var rows = Array.prototype.slice.call(document.querySelectorAll('.row'));
+    var groups = Array.prototype.slice.call(document.querySelectorAll('.group'));
+    var input = document.getElementById('q');
+    var empty = document.getElementById('empty');
+    var status = 'all';
+
+    function apply() {
+      var q = (input.value || '').trim().toLowerCase();
+      rows.forEach(function (r) {
+        var okStatus = status === 'all' || r.getAttribute('data-status') === status;
+        var hay = (r.getAttribute('data-search') || '') + ' ' + r.textContent.toLowerCase();
+        var okQuery = !q || hay.toLowerCase().indexOf(q) !== -1;
+        r.classList.toggle('hide', !(okStatus && okQuery));
+      });
+      var any = false;
+      groups.forEach(function (g) {
+        var visible = g.querySelectorAll('.row:not(.hide)').length > 0;
+        g.classList.toggle('hide', !visible);
+        if (visible) any = true;
+      });
+      empty.classList.toggle('hide', any);
+    }
+
+    chips.forEach(function (c) {
+      c.addEventListener('click', function () {
+        status = c.getAttribute('data-status');
+        chips.forEach(function (x) { x.setAttribute('aria-pressed', String(x === c)); });
+        apply();
+      });
+    });
+
+    input.addEventListener('input', apply);
+    apply();
+  })();
+</script>
+</body>
+</html>

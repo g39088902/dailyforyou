@@ -36,13 +36,6 @@ export const verifyWalletSignature = (payload) => {
   });
 };
 
-export const getAuthMe = () => {
-  return axios({
-    method: "GET",
-    url: "/auth/me",
-  });
-};
-
 export const logoutAuth = () => {
   return axios({
     method: "POST",

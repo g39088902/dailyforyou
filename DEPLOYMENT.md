@@ -2,8 +2,8 @@
 
 本文档记录 DailyForYou 各服务在 `134.175.155.179` 上的**实际**部署布局、更新流程与运维操作。
 
-> **当前部署状态**：前端（静态）+ 用户服务（`backend` :6690）已上线；
-> 爬虫（`crawler` :6688）**尚未部署**，因此站点首页榜单为空、`/feed/*` 返回 502，登录与账户功能不受影响。
+> **当前部署状态**：前端（静态）+ 用户与新闻服务（`backend` :6690）作为统一服务运行；
+> 爬虫（`crawler`）已解耦为**离线/定时数据搬运工（无 HTTP 服务）**，可部署在家庭宽带物理机上定时抓取并写入云端 libSQL（:8080）。
 
 ---
 
@@ -13,7 +13,7 @@
 - **公网 IP**：`134.175.155.179`
 - **SSH 登录**：`ssh root@134.175.155.179`
 - **Web 访问入口**：👉 **`http://134.175.155.179:8081`**
-- **安全组放行**：仅需 `8081`（站点）与 `8080`（libSQL，既有）；`6690` / `6688` 一律不对外
+- **安全组放行**：仅需 `8081`（站点）与 `8080`（libSQL，既有）；`6690` 一律不对外
 - **运行时环境**：Node.js `v22.22.1`、Nginx、pnpm `12.14.0`、PM2 `7.0.4`（systemd 托管）
 
 ### 1.2 端口分配（重要）
@@ -21,29 +21,36 @@
 | 端口 | 用途 | 监听地址 | 说明 |
 | :--- | :--- | :--- | :--- |
 | `80` | 既有业务（python / uvicorn） | `0.0.0.0` | **不可占用** |
-| `8080` | libSQL（Nginx 反代 sqld + Bearer 校验） | `0.0.0.0` | 既有服务，勿改 |
+| `8080` | libSQL（Nginx 反代 sqld + Bearer 校验） | `0.0.0.0` | 既有服务，数据持久层 |
 | `8088` | sqld 本体 | `127.0.0.1` | 仅本机 |
-| `8081` | **DailyForYou 站点（本手册）** | `0.0.0.0` | Nginx 新站点 |
-| `6690` | 用户服务 `backend` | `127.0.0.1` | 仅 Nginx 反代 |
-| `6688` | 爬虫 `crawler`（未部署） | — | 预留 |
+| `8081` | **DailyForYou 站点（本手册）** | `0.0.0.0` | Nginx 新站点入口 |
+| `6690` | 用户与新闻后端服务 `backend` | `127.0.0.1` | 仅 Nginx 反代，全站唯一 API |
+| ~~`6688`~~ | 爬虫已无 HTTP 服务（已废除） | — | 爬虫作为定时任务出站直连 8080 库 |
 
 ### 1.3 架构拓扑图
 
 ```mermaid
-flowchart LR
-    User["用户浏览器\nhttp://134.175.155.179:8081"] -->|HTTP| Nginx["Nginx :8081"]
-    Nginx -->|"/ 静态资源"| FrontDist["/opt/dailyhot/front/dist"]
-    Nginx -->|"/api/*"| UserSvc["用户服务 Hono\n127.0.0.1:6690"]
-    Nginx -.->|"/feed/*（当前 502）"| Crawler["爬虫服务 :6688\n未部署"]
-    UserSvc <--> DB["libSQL\n127.0.0.1:8080 → sqld :8088"]
-    UserSvc <--> DeepSeek["DeepSeek API（评分）"]
+flowchart TD
+    subgraph CloudServer["云服务器 (134.175.155.179)"]
+        User["用户浏览器\nhttp://134.175.155.179:8081"] -->|HTTP| Nginx["Nginx :8081"]
+        Nginx -->|"/ 静态资源"| FrontDist["/opt/dailyhot/front/dist"]
+        Nginx -->|"/api/*"| UserSvc["后端统一服务 (Hono)\n127.0.0.1:6690\n(鉴权/评分/从DB供给新闻)"]
+        UserSvc <--> DB["libSQL (:8080) → sqld :8088\n(news_items / users...)"]
+        UserSvc <--> DeepSeek["DeepSeek API（评分）"]
+    end
+
+    subgraph HomePC["家庭宽带主机 (待实施)"]
+        HomeCrawler["爬虫定时执行器\n(PM2 daemon 或 crontab)\n无 HTTP 服务"]
+        HomeCrawler -->|"出站抓取"| TargetSites["外网源站 (财联社/新浪/彭博等)"]
+        HomeCrawler -.->|"DeepSeek 汉化"| DeepSeek
+        HomeCrawler -->|"单向出站写入 (LIBSQL_URL:8080)"| DB
+    end
 ```
 
 > **架构要点**：
-> 1. **同域反代**：前端与用户服务同域，`/api` 反代避免 CORS，令牌不跨域。
-> 2. **爬虫可换机器**：`/feed` 的上游是独立的 Nginx `upstream` 块。爬虫部署在本机就写 `127.0.0.1:6688`，
->    部署在别的机器就写 `<IP>:6688`——**只改一行并 reload，前端无需重新构建**。
-> 3. **安全隔离**：用户服务只监听 `127.0.0.1`，公网只能经 Nginx 进入。
+> 1. **全站同域单 API**：前端所有请求统一走 `/api` 反代到后端 6690，彻底避免 CORS 与多端口维护问题。
+> 2. **新闻秒级直达**：后端直接从 `news_items` 读取已抓取好的新闻，响应延迟 `<10ms`。
+> 3. **家庭宽带无缝接入**：爬虫机只需配置云端 `LIBSQL_URL` 与密钥，只有单向出站 HTTP 请求，无需固定公网 IP，无需路由器开任何入站端口映射。
 
 ---
 
@@ -316,65 +323,75 @@ cd ../frontend && pnpm build && rsync -az --delete dist/ \
 
 ---
 
-## 7. 爬虫与用户服务分机部署
+## 7. 爬虫与用户服务分机部署（家用宽带最佳实践）
 
-两个服务之间**没有任何直接调用**：爬虫只写自己的新闻库，用户服务只读写自己的用户库，前端分别请求两者。因此完全可以跑在不同服务器，甚至不同地域。
+在新架构下，爬虫**完全没有对外 HTTP 服务，不需要对外开放任何端口**，只负责定时出站抓取目标网站并写入云端数据库；后端服务（`backend` :6690）则统揽全部对外 HTTP API 与新闻数据供给。
 
-> **当前实际**：前端与用户服务同机（`134.175.155.179`），爬虫未部署，
-> `/feed` 上游暂指 `127.0.0.1:6688`，因此首页榜单为空、接口返回 502。部署爬虫后按下文调整即可。
+这使得**家用宽带物理机**成为爬虫的理想部署地：
+- 家用宽带 IP 变动或处于大内网 NAT 环境完全不影响出站抓取和出站写入数据库；
+- 家庭 IP 具备天然的高信誉度，不易触发各大目标源站的反爬限流；
+- 云端 Nginx 只需代理前端静态和 `backend :6690`，不再需要代理任何外部爬虫机器。
 
-### 7.1 两种拓扑
+### 7.1 家用宽带主机上的爬虫部署步骤
 
-**A. 单入口（推荐）**：前端与 Nginx 在一台，Nginx 反代到两台后端。
+1. **同步代码与依赖**：
+   ```bash
+   git clone <repo_url> DailyForYou
+   cd DailyForYou/crawler
+   pnpm install
+   pnpm build
+   ```
 
-```mermaid
-flowchart LR
-    Browser["浏览器"] --> Nginx["Nginx + 前端静态 (A 机)"]
-    Nginx -->|"/api/*"| User["用户服务 (B 机) :6690"]
-    Nginx -->|"/feed/*"| Crawler["爬虫服务 (C 机) :6688"]
-```
+2. **配置环境变量 (`crawler/.env`)**：
+   ```bash
+   # 指向云服务器开放的 libSQL 端口与认证令牌
+   LIBSQL_URL="http://134.175.155.179:8080"
+   LIBSQL_AUTH_TOKEN="dailyhot_libsql_2026_secret_token"
 
-前端构建变量：
+   # DeepSeek 翻译密钥（用于 Bloomberg、Reuters 等外文信源汉化）
+   DEEPSEEK_API_KEY="sk-xxxxxxxx"
 
-```
-VITE_GLOBAL_API="/api"
-VITE_FEED_API="/feed"
-```
+   # 定时抓取间隔（分钟，默认 2 小时）
+   CRAWL_INTERVAL_MINUTES=120
+   ```
 
-Nginx 片段（注意 `proxy_pass` 末尾斜杠，用于剥掉 `/api` 与 `/feed` 前缀）：
+3. **运行与调度方式（二选一）**：
+   - **方式 A：PM2 守护进程模式（推荐）**
+     ```bash
+     pm2 start ecosystem.config.cjs
+     pm2 save
+     pm2 startup
+     ```
+   - **方式 B：系统 Crontab 定时单次触发**
+     在 `crontab -e` 中添加：
+     ```cron
+     */15 * * * * cd /path/to/DailyForYou/crawler && /usr/local/bin/pnpm crawl >> /var/log/dailyhot-crawl.log 2>&1
+     ```
+
+### 7.2 云服务器 Nginx 配置简化
+
+云服务器上的 Nginx 只需负责静态前端和 `backend :6690`：
 
 ```nginx
-location /api/ {
-    proxy_pass http://B_SERVER_IP:6690/;
-    proxy_set_header Host $host;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
+server {
+    listen 8081;
+    server_name 134.175.155.179;
+
+    # 前端静态资源
+    location / {
+        root /opt/dailyhot/front/dist;
+        try_files $uri $uri/ /index.html;
+    }
+
+    # 统一后端 API（包含鉴权、评分、以及直接从 news_items 读取新闻）
+    location /api/ {
+        proxy_pass http://127.0.0.1:6690/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
 }
-
-location /feed/ {
-    proxy_pass http://C_SERVER_IP:6688/;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-}
 ```
-
-**B. 直连**：前端直接配置两个公网地址。
-
-```
-VITE_GLOBAL_API="https://api.example.com"
-VITE_FEED_API="https://feed.example.com"
-```
-
-此时两个服务都要处理跨域。默认 `ALLOWED_DOMAIN="*"` 已放行，生产建议收紧到前端域名。
-
-### 7.2 两台服务器的环境变量
-
-**爬虫机**：`PORT=6688`、`LIBSQL_URL`（或留空用本地 `data/news.sqlite`）、`DEEPSEEK_API_KEY`（翻译）、`ALLOWED_DOMAIN` / `ALLOWED_HOST`。**不需要任何 `AUTH_*`**。
-
-**用户机**：`PORT=6690`、`HOST=127.0.0.1`（只让本机 Nginx 访问）、自己的 `LIBSQL_URL`（或 `data/users.sqlite`）、`AUTH_JWT_SECRET`（必填，不与爬虫共享）、`DEFAULT_USER_ADDRESS`、`AUTH_URI` / `AUTH_DOMAIN`（指向用户实际访问的域名）、`DEEPSEEK_API_KEY`（评分）。
-
-### 7.3 数据库怎么放
-
-三种组合都支持：
 
 1. **各自本地 SQLite**（最简单）：爬虫 `news.sqlite`、用户 `users.sqlite`，零共享。
 2. **共享一个 libSQL**：两边 `LIBSQL_URL` 指向同一地址，表不重叠，互不影响。

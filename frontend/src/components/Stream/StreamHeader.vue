@@ -27,7 +27,14 @@
           信源加载 ({{ loadedSourcesCount }}/{{ sourceCount }})
         </n-tag>
         <n-tag v-else round type="success" size="small">信源加载完成</n-tag>
-        <n-tag v-if="!authStore.isAuthed" round type="warning" size="small">
+        <n-tag
+          v-if="!authStore.isAuthed"
+          round
+          type="warning"
+          size="small"
+          style="cursor: pointer;"
+          @click="emitAuthEvent(AUTH_EVENTS.OPEN_LOGIN)"
+        >
           登录后启用 AI 评分
         </n-tag>
         <n-tag v-if="isScoring" round type="warning" size="small">
@@ -92,6 +99,7 @@ import StreamClock from "@/components/Stream/StreamClock.vue";
 import AccountEntry from "@/components/Auth/AccountEntry.vue";
 import { mainStore } from "@/store";
 import { useAuthStore } from "@/store/auth";
+import { AUTH_EVENTS, emitAuthEvent } from "@/utils/authEvents";
 
 const router = useRouter();
 const store = mainStore();

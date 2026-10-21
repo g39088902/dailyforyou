@@ -18,18 +18,24 @@
       </main>
       <Footer />
     </n-layout>
+    <LoginModal />
   </Provider>
 </template>
 
 <script setup>
+import { computed, nextTick, onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
 import { mainStore } from "@/store";
+import { useAuthStore } from "@/store/auth";
+import { AUTH_EVENTS, emitAuthEvent } from "@/utils/authEvents";
 import Provider from "@/components/Provider.vue";
 import Header from "@/components/Header.vue";
 import Footer from "@/components/Footer.vue";
+import LoginModal from "@/components/Auth/LoginModal.vue";
 
 const route = useRoute();
 const store = mainStore();
+const authStore = useAuthStore();
 store.checkNewsUpdate();
 
 const isStreamPage = computed(() => route.path === "/stream" || route.path === "/");
@@ -49,6 +55,13 @@ onMounted(() => {
       store.newsArr = store.defaultNewsArr.map((item) => ({ ...item }));
     }
   });
+
+  // 未登录状态打开网页时，默认弹窗引导用户登录（可关闭）
+  if (!authStore.isAuthed) {
+    nextTick(() => {
+      emitAuthEvent(AUTH_EVENTS.OPEN_LOGIN);
+    });
+  }
 });
 </script>
 

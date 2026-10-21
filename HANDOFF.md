@@ -60,7 +60,6 @@
 curl -s -o /dev/null -w "%{http_code}\n" http://134.175.155.179:8081/                      # 200
 curl -s -o /dev/null -w "%{http_code}\n" http://134.175.155.179:8081/api/auth/providers    # 200
 curl -s -o /dev/null -w "%{http_code}\n" http://134.175.155.179:8081/api/score             # 401 + needLogin
-curl -s -o /dev/null -w "%{http_code}\n" http://134.175.155.179:8081/feed/all              # 200（43 个信源）
 curl -s -o /dev/null -w "%{http_code}\n" http://134.175.155.179:8081/feed/cls?limit=3      # 200 + 入库 news_items
 ```
 

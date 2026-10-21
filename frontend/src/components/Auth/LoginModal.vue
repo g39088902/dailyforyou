@@ -50,7 +50,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { storeToRefs } from "pinia";
 import { useAuthStore } from "@/store/auth";
 import { getAuthNonce, getAuthProviders, verifyWalletSignature } from "@/api/auth";
@@ -123,8 +123,13 @@ const handleLogin = async () => {
   }
 };
 
+let offOpen = null;
 onMounted(() => {
-  onAuthEvent(AUTH_EVENTS.OPEN_LOGIN, open);
+  offOpen = onAuthEvent(AUTH_EVENTS.OPEN_LOGIN, open);
+});
+
+onUnmounted(() => {
+  if (offOpen) offOpen();
 });
 
 defineExpose({ open });

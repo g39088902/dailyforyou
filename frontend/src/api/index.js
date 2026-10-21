@@ -1,6 +1,6 @@
 import axios from "@/api/request";
 
-// 榜单抓取由独立的爬虫服务承载；未单独配置时回退到默认 API 地址
+// 榜单数据由后端服务（:6690）从数据库直接供给，不再访问爬虫服务
 const FEED_BASE_URL =
   import.meta.env.VITE_FEED_API || import.meta.env.VITE_GLOBAL_API;
 

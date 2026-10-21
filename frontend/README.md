@@ -133,19 +133,17 @@ pnpm install
 复制或新建 `.env` 文件：
 
 ```env
-# 用户服务（登录 / 评分 / 账户 / Prompt）
+# 用户与新闻后端服务（登录 / 评分 / 账户 / Prompt / 资讯供给）
 VITE_GLOBAL_API="http://localhost:6690"
-
-# 爬虫服务（榜单抓取）
-VITE_FEED_API="http://localhost:6688"
+VITE_FEED_API="http://localhost:6690"
 
 # 站点路由基准路径（默认为 /）
 VITE_DIR="/"
 ```
 
 > [!TIP]
-> 两个后端分别位于同级的 [`backend/`](../backend)（:6690）与 [`crawler/`](../crawler)（:6688）。
-> 生产环境用同域反代，`.env.production` 中写相对路径 `/api` 与 `/feed`，避免 CORS 与硬编码 IP。
+> 统一后端服务位于同级的 [`backend/`](../backend)（:6690），新闻资讯直接由后端从数据库秒级读取供给。
+> 生产环境用同域反代，`.env.production` 中写相对路径 `/api`，避免 CORS 与硬编码 IP。
 
 ### 3. 本地开发与构建
 

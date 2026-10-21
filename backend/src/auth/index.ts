@@ -11,15 +11,13 @@ import {
   createAuthNonce,
   findOrCreateUserByWallet,
   getAuthNonce,
-  getUserById,
-  listIdentitiesByUser,
   purgeExpiredNonces,
   recordNonceFailure,
 } from "../utils/authDb.js";
 import { getPromptRecord } from "../utils/promptDb.js";
 import { buildSiweMessage, extractAddress, extractNonce, resolveAuthDomain, resolveAuthUri } from "./message.js";
 import { signAuthToken } from "./jwt.js";
-import { requireAuth, type AuthEnv } from "./middleware.js";
+import { type AuthEnv } from "./middleware.js";
 import { assertProviderEnabled, listAuthProviders } from "./providers.js";
 import type { AuthProviderId } from "../types.js";
 
@@ -220,55 +218,6 @@ authRouter.post("/verify", async (c) => {
     const msg = error instanceof Error ? error.message : "Unknown error";
     logger.error(`❌ [Auth] verify failed: ${msg}`);
     return c.json({ code: 500, message: `登录失败: ${msg}` }, 500);
-  }
-});
-
-/**
- * 当前登录用户信息
- */
-authRouter.get("/me", requireAuth, async (c) => {
-  try {
-    const { userId } = c.get("authUser");
-    const user = await getUserById(userId);
-    if (!user) {
-      return c.json({ code: 401, message: "用户不存在，请重新登录", needLogin: true }, 401);
-    }
-
-    const identities = await listIdentitiesByUser(userId);
-    const ethereumIdentity = identities.find((item) => item.provider === "ethereum");
-    const prompt = await getPromptRecord(userId);
-
-    return c.json({
-      code: 200,
-      data: {
-        user: ethereumIdentity
-          ? buildUserPayload(user, ethereumIdentity.provider_user_id, prompt)
-          : {
-              id: user.id,
-              displayName: user.display_name,
-              address: null,
-              provider: null,
-              isDefaultAccount: user.id === config.DEFAULT_USER_ID,
-              promptHash: prompt.promptHash,
-              promptUpdatedAt: prompt.updatedAt,
-            },
-        identities: identities.map((item) => ({
-          provider: item.provider,
-          providerUserId: item.provider_user_id,
-          createdAt: item.created_at,
-          lastLoginAt: item.last_login_at,
-        })),
-        profile: {
-          promptHash: prompt.promptHash,
-          promptUpdatedAt: prompt.updatedAt,
-          promptLength: prompt.prompt.length,
-        },
-      },
-    });
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : "Unknown error";
-    logger.error(`❌ [Auth] me failed: ${msg}`);
-    return c.json({ code: 500, message: `获取用户信息失败: ${msg}` }, 500);
   }
 });
 

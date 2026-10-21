@@ -5,38 +5,49 @@
       secondary
       strong
       round
-      size="small"
+      :size="size"
       @click="openLogin"
     >
+      <template #icon>
+        <n-icon :component="WalletOne" />
+      </template>
       登录
     </n-button>
 
     <n-dropdown v-else :options="menuOptions" trigger="click" @select="handleSelect">
-      <n-button secondary strong round size="small">
+      <n-button secondary strong round :size="size">
+        <template #icon>
+          <n-icon :component="WalletOne" />
+        </template>
         {{ authStore.shortAddress || "我的账户" }}
       </n-button>
     </n-dropdown>
-
-    <LoginModal ref="loginModalRef" />
   </div>
 </template>
 
 <script setup>
-import { computed, h, ref } from "vue";
+import { computed, h } from "vue";
 import { useRouter } from "vue-router";
 import { NText } from "naive-ui";
 import { storeToRefs } from "pinia";
+import { WalletOne } from "@icon-park/vue-next";
 import { useAuthStore } from "@/store/auth";
 import { logoutAuth } from "@/api/auth";
-import LoginModal from "@/components/Auth/LoginModal.vue";
+import { AUTH_EVENTS, emitAuthEvent } from "@/utils/authEvents";
+
+defineProps({
+  size: {
+    type: String,
+    default: undefined,
+  },
+});
 
 const router = useRouter();
 const authStore = useAuthStore();
 const { isAuthed } = storeToRefs(authStore);
-const loginModalRef = ref(null);
 
 const openLogin = () => {
-  loginModalRef.value?.open?.();
+  emitAuthEvent(AUTH_EVENTS.OPEN_LOGIN);
 };
 
 const menuOptions = computed(() => [
