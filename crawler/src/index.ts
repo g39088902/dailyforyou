@@ -2,7 +2,10 @@ import { config } from "./config.js";
 import logger from "./utils/logger.js";
 import { openDatabase, closeDatabase } from "./db/client.js";
 import { runCrawlerMigrations } from "./db/migrations.js";
+import { reconcileSources } from "./db/sourcesRepo.js";
 import { runCrawlTask } from "./runner.js";
+import { syncLogos } from "./utils/syncLogos.js";
+import { runDoctor } from "./utils/doctor.js";
 
 // 防止未捕获异常导致进程无提示退出
 process.on("uncaughtException", (err) => {
@@ -39,6 +42,8 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const main = async () => {
   const args = process.argv.slice(2);
+  const isDoctor = args.includes("--doctor");
+  const isSyncLogos = args.includes("--sync-logos");
   const isDaemon = args.includes("--daemon") || process.env.DAEMON_MODE === "true";
   const sourceArg = args.find((a) => !a.startsWith("--"));
 
@@ -51,6 +56,27 @@ const main = async () => {
     await openDatabase();
     await runCrawlerMigrations();
 
+    // 1. 图标同步指令 (pnpm crawl --sync-logos)
+    if (isSyncLogos) {
+      await reconcileSources();
+      logger.info(`🖼️ [Crawler] 执行图标入库同步任务 (--sync-logos)...`);
+      await syncLogos();
+      await closeDatabase();
+      process.exit(0);
+    }
+
+    // 2. 四方对账与健康诊断指令 (pnpm crawl --doctor)
+    if (isDoctor) {
+      await reconcileSources();
+      await runDoctor();
+      await closeDatabase();
+      process.exit(0);
+    }
+
+    // 3. 运行前对账（启动对账并自愈异常状态）
+    await reconcileSources();
+
+    // 4. 定时守护模式与单次抓取模式
     if (isDaemon) {
       logger.info(
         `🕷️ [Crawler] 启动定时调度模式 (Daemon Mode)，轮询间隔: ${intervalMinutes} 分钟`,

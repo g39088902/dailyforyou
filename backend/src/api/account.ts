@@ -231,6 +231,7 @@ accountRouter.post("/prompt/test", requireAuth, async (c) => {
       raw: completion.raw,
       latencyMs: completion.latencyMs,
       model: completion.model,
+      usage: completion.usage,
       promptHash,
       warnings: [],
     });

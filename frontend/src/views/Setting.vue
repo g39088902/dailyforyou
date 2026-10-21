@@ -105,27 +105,44 @@
         </n-space>
       </div>
       <draggable
-        v-model="newsArr"
+        v-model="draggableSources"
         :animation="200"
         class="mews-group"
-        item-key="name"
-        @end="saveSoreData()"
+        item-key="key"
+        @end="onDragEnd"
       >
         <template #item="{ element }">
           <n-card
             class="item"
+            :class="{ disabled: element.enabled === false }"
             embedded
             :content-style="{ display: 'flex', alignItems: 'center' }"
           >
             <div class="desc" :style="{ opacity: element.show ? null : 0.6 }">
-              <img class="logo" :src="`/logo/${element.name}.png`" alt="logo" />
-              <n-text class="news-name" v-html="element.label" />
+              <img
+                class="logo"
+                :src="resolveLogoUrl(element.logo)"
+                :alt="element.label"
+              />
+              <div class="news-meta">
+                <n-text class="news-name" v-html="element.label" />
+                <n-tag
+                  v-if="element.enabled === false"
+                  size="tiny"
+                  type="warning"
+                  :bordered="false"
+                  class="status-tag"
+                >
+                  暂不可用
+                </n-tag>
+              </div>
             </div>
             <n-switch
               class="switch"
               :round="false"
+              :disabled="element.enabled === false"
               v-model:value="element.show"
-              @update:value="saveSoreData(element.label, element.show)"
+              @update:value="onToggleShow(element.key, element.label, element.show)"
             />
           </n-card>
         </template>
@@ -152,8 +169,10 @@
 </template>
 
 <script setup>
+import { ref, watch } from "vue";
 import { storeToRefs } from "pinia";
 import { mainStore } from "@/store";
+import { resolveLogoUrl } from "@/api";
 import { useOsTheme } from "naive-ui";
 import draggable from "vuedraggable";
 
@@ -162,11 +181,21 @@ const osThemeRef = useOsTheme();
 const {
   siteTheme,
   siteThemeAuto,
-  newsArr,
   linkOpenType,
   headerFixed,
   listFontSize,
 } = storeToRefs(store);
+
+// 保持本地临时拖拽数组与 store.sources 同步
+const draggableSources = ref([...store.sources]);
+
+watch(
+  () => store.sources,
+  (newSources) => {
+    draggableSources.value = [...newSources];
+  },
+  { deep: true, immediate: true }
+);
 
 // 深浅模式
 const themeOptions = ref([
@@ -194,7 +223,6 @@ const linkOptions = [
 
 // 开启明暗自动跟随
 const themeAutoOpen = (val) => {
-  console.log(osThemeRef.value);
   if (val) {
     siteTheme.value = osThemeRef.value;
   }
@@ -202,25 +230,26 @@ const themeAutoOpen = (val) => {
 
 // 全选 / 全不选
 const setAllNewsShow = (show) => {
-  newsArr.value = newsArr.value.map((item) => ({
-    ...item,
-    show,
-  }));
-  $message.success(show ? "已开启全部榜单" : "已关闭全部榜单");
+  store.setAllSourcesShow(show);
+  window.$message?.success(show ? "已开启全部榜单" : "已关闭全部榜单");
 };
 
 // 恢复默认排序
 const restoreDefault = () => {
-  newsArr.value = [...newsArr.value].sort((a, b) => a.order - b.order);
-  $message.success("恢复默认榜单排序成功");
+  store.restoreDefaultSources();
+  window.$message?.success("恢复默认榜单排序成功");
 };
 
-// 将排序结果写入
-const saveSoreData = (name = null, open = false) => {
-  newsArr.value = [...newsArr.value];
-  $message.success(
-    name ? `${name}榜单已${open ? "开启" : "关闭"}` : "榜单排序成功"
-  );
+// 拖拽完成同步偏好
+const onDragEnd = () => {
+  store.syncPrefsFromSources(draggableSources.value);
+  window.$message?.success("榜单排序成功");
+};
+
+// 单项开关变更
+const onToggleShow = (key, label, show) => {
+  store.setSourcePref(key, { show });
+  window.$message?.success(`${label}榜单已${show ? "开启" : "关闭"}`);
 };
 
 // 重置数据
@@ -297,6 +326,11 @@ const reset = () => {
       .item {
         cursor: pointer;
 
+        &.disabled {
+          opacity: 0.55;
+          filter: grayscale(0.8);
+        }
+
         .desc {
           display: flex;
           align-items: center;
@@ -307,10 +341,22 @@ const reset = () => {
             width: 40px;
             height: 40px;
             margin-right: 12px;
+            border-radius: 8px;
+            object-fit: cover;
           }
 
-          .news-name {
-            font-size: 16px;
+          .news-meta {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+
+            .news-name {
+              font-size: 16px;
+            }
+
+            .status-tag {
+              align-self: flex-start;
+            }
           }
         }
 

@@ -62,7 +62,6 @@ flowchart TD
 │   ├── .env                           # 生产环境变量（权限 600）
 │   ├── dist/                          # tsc 编译产物，PM2 直接运行 dist/index.js
 │   ├── node_modules/                  # pnpm install --prod
-│   ├── scripts/                       # login-e2e / backup-scores / rollback
 │   ├── logs/                          # PM2 与 winston 日志
 │   ├── data/                          # 仅本地 SQLite 模式使用
 │   ├── ecosystem.config.cjs           # PM2：dailyhot-back
@@ -223,9 +222,6 @@ const c = createClient({ url: pick('LIBSQL_URL'), authToken: pick('LIBSQL_AUTH_T
 for (const t of ['users','auth_identities','user_news_states']) {
   console.log(t, (await c.execute('select count(*) c from '+t)).rows[0].c);
 }"
-
-# 历史数据备份（导出旧表为 JSON，含行数与 md5）
-node scripts/backup-scores.mjs
 ```
 
 ---
@@ -264,12 +260,7 @@ node scripts/backup-scores.mjs
 - **爬虫**：账本 `crawler_migrations`，创建 `news_items`（已存在则跳过）。
 - **用户服务**：账本 `user_migrations`，创建 `users` / `auth_identities` / `auth_nonces` / `user_profiles` / `user_news_states`；其中 `u003` 会补齐 `source/title/url` 三列，并从 `news_items` **一次性**回填历史索引（仅迁移期读取，运行期不再依赖）。
 
-迁移前务必备份用户数据：
-
-```bash
-cd /opt/dailyhot/back
-node scripts/backup-scores.mjs          # 导出 JSON 到 data/backup/，含行数与 md5
-```
+迁移前务必备份用户数据（libSQL 数据目录快照，或 `sqld` 自带的备份方式）。
 
 迁移后验证：
 
@@ -319,7 +310,7 @@ cd ../frontend && pnpm build && rsync -az --delete dist/ \
 
 - 迁移失败会自动回滚事务，迁移账本不写入记录，修复原因后重启即重跑。
 - 两个账本独立：`crawler_migrations`（爬虫）与 `user_migrations`（用户服务），升级互不影响。
-- 需要退回旧版本：`news_scores` 未被修改，直接回滚代码与 `dist` 即可；期间新产生的评分可用 `scripts/rollback-user-states.mjs` 回灌到旧表。
+- 需要退回旧版本：`news_scores` 未被修改，直接回滚代码与 `dist` 即可；期间新产生的评分需要人工从 `user_news_states` 回灌到旧表。
 
 ---
 

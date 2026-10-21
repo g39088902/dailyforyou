@@ -1,5 +1,16 @@
 <template>
   <div class="stream-view">
+    <!-- 顶部降级提示条（如果处于 degraded 状态） -->
+    <n-alert
+      v-if="store.sourcesStatus === 'degraded'"
+      type="warning"
+      closable
+      :bordered="false"
+      class="degraded-banner"
+    >
+      信源清单可能不是最新，正在后台重试连接后端...
+    </n-alert>
+
     <!-- 顶部状态栏与操作面板 -->
     <stream-header
       :source-count="sourceCount"
@@ -18,7 +29,7 @@
 
     <!-- 顶部信源快捷导航 -->
     <stream-source-nav
-      :sources="activeSources"
+      :sources="visibleSources"
       :current-filter="currentSourceFilter"
       :loading-map="sourceLoadingMap"
       :data-map="sourceDataMap"
@@ -27,9 +38,28 @@
 
     <!-- 聚合主列表（不分页，已打分按分数降序，未打分按原顺序） -->
     <n-card class="stream-card" :bordered="false">
+      <!-- 初始未就绪或未初始化状态 -->
+      <div
+        v-if="store.sourcesStatus === 'uninitialized' && store.sources.length === 0"
+        class="empty-state"
+      >
+        <n-empty description="正在初始化，请稍后重试">
+          <template #extra>
+            <n-button
+              size="small"
+              type="primary"
+              :loading="store.sourcesLoading"
+              @click="store.loadSources()"
+            >
+              重试连接
+            </n-button>
+          </template>
+        </n-empty>
+      </div>
+
       <!-- 初始无任何数据且正在加载第一个信源时的骨架 -->
       <div
-        v-if="isLoading && allArticles.length === 0"
+        v-else-if="isLoading && allArticles.length === 0"
         class="loading-state"
       >
         <div class="first-load-tip">
@@ -78,7 +108,7 @@
         <n-list hoverable clickable>
           <stream-article-item
             v-for="(item, index) in displayedArticles"
-            :key="item._uniqueKey || `${item._sourceName}-${item.id || index}`"
+            :key="item._uniqueKey || `${item._sourceKey}-${item.id || index}`"
             :ref="getArticleItemRefSetter(item._uniqueKey)"
             :item="item"
             :index="index"
@@ -178,6 +208,7 @@ const {
   sourceLoadingMap,
   isLoading,
   currentFetchingSourceLabel,
+  visibleSources,
   activeSources,
   sourceCount,
   loadedSourcesCount,
@@ -188,7 +219,6 @@ const {
   isAborted,
 } = useStreamSources({
   onBeforeLoadAll: ({ isNew }) => {
-    // 重新加载/刷新信源时，将本次会话新读条目正式计入已读打标中
     commitSessionReadToDisplayed();
     return resetScoreQueue(isNew);
   },
@@ -197,7 +227,7 @@ const {
   },
 });
 
-// 4. 登录态与 Prompt 变化：清空本地评分/已读并复用已加载信源重新评分
+// 4. 登录态与 Prompt 变化
 const authStore = useAuthStore();
 let lastScoredUserId = authStore.userId;
 let lastAppliedPromptHash = authStore.promptHash;
@@ -224,34 +254,29 @@ watch(
   (hash) => {
     if (!authStore.isAuthed || !hash || hash === lastAppliedPromptHash) return;
     lastAppliedPromptHash = hash;
-    // 旧评分已失效，复用已加载的信源数据重新入队评分
     resetScoreQueue(true);
     loadAllSourcesSequentially(false);
   }
 );
 
-// 5. 汇总并排序新闻列表：
-// 1) 已打分按分数降序排列（同分按原顺序排列）
-// 2) 未打分排在已打分之后，严格保持原顺序
+// 5. 汇总并排序新闻列表
 const allArticles = computed(() => {
   const merged = [];
   let originalIndex = 0;
 
   for (const source of activeSources.value) {
-    if (currentSourceFilter.value && currentSourceFilter.value !== source.name) {
+    if (currentSourceFilter.value && currentSourceFilter.value !== source.key) {
       continue;
     }
-    const res = sourceDataMap[source.name];
+    const res = sourceDataMap[source.key];
     if (res && Array.isArray(res.data)) {
       res.data.forEach((item, index) => {
-        const uniqueKey = `${source.name}-${item.id || item.url || index}`;
+        const uniqueKey = `${source.key}-${item.id || item.url || index}`;
         const scoreInfo = scoreMap[uniqueKey];
         const hasScore =
           scoreInfo && scoreInfo.status === "done" && typeof scoreInfo.score === "number";
         const newsHash = scoreInfo?.newsHash || item.newsHash || "";
 
-        // 仅根据 displayedReadSet 判定是否在前端打标“已读”
-        // 用户本次会话新阅读的内容不打标，等到下一次刷新/打开才打标
         const isRead =
           displayedReadSet.has(uniqueKey) ||
           (newsHash ? displayedReadSet.has(newsHash) : false);
@@ -266,13 +291,14 @@ const allArticles = computed(() => {
         const sourceOrder = source.order ?? 0;
         const currentOriginalIndex = originalIndex++;
 
-        // 复用未发生字段变化的条目对象引用，避免列表每次部分更新导致全部子组件重新渲染
         const prevObj = articleMetaLookup.get(uniqueKey);
         if (
           prevObj &&
           prevObj._rawItem === item &&
+          prevObj._sourceKey === source.key &&
           prevObj._sourceName === source.name &&
           prevObj._sourceLabel === source.label &&
+          prevObj._sourceLogo === source.logo &&
           prevObj._sourceOrder === sourceOrder &&
           prevObj._indexInSource === index &&
           prevObj._originalIndex === currentOriginalIndex &&
@@ -292,8 +318,10 @@ const allArticles = computed(() => {
         const articleObj = {
           ...item,
           _rawItem: item,
+          _sourceKey: source.key,
           _sourceName: source.name,
           _sourceLabel: source.label,
+          _sourceLogo: source.logo,
           _sourceOrder: sourceOrder,
           _indexInSource: index,
           _originalIndex: currentOriginalIndex,
@@ -318,7 +346,6 @@ const allArticles = computed(() => {
     const aScored = typeof a._score === "number";
     const bScored = typeof b._score === "number";
 
-    // 两篇都已打分：按分数降序，同分按原顺序
     if (aScored && bScored) {
       if (b._score !== a._score) {
         return b._score - a._score;
@@ -326,19 +353,16 @@ const allArticles = computed(() => {
       return a._originalIndex - b._originalIndex;
     }
 
-    // 已打分排在未打分之前
     if (aScored !== bScored) {
       return aScored ? -1 : 1;
     }
 
-    // 两篇都未打分：按原顺序排列
     return a._originalIndex - b._originalIndex;
   });
 
   return merged;
 });
 
-// 实际展示的新闻列表（当开启“隐藏已读”时仅过滤已被打标为已读的内容）
 const displayedArticles = computed(() => {
   if (!store.hideReadNews) {
     return allArticles.value;
@@ -346,7 +370,6 @@ const displayedArticles = computed(() => {
   return allArticles.value.filter((item) => !item._isRead);
 });
 
-// 单次遍历汇总各项计数指标，避免每次渲染重复遍历过滤 4 次全量数组
 const streamStats = computed(() => {
   const list = allArticles.value;
   let scored = 0;
@@ -387,7 +410,6 @@ const scoreProgressPercentage = computed(() => {
   );
 });
 
-// 链接跳转处理（静默在后台标记已读并持久化，不在本次会话中改变当前条目打标样式）
 const jumpLink = (data) => {
   if (data && !persistedReadSet.has(data._uniqueKey)) {
     markArticleAsRead(data, true, false);
@@ -410,7 +432,6 @@ onMounted(() => {
   loadAllSourcesSequentially(false);
 });
 
-// App.vue 使用 keep-alive 缓存页面，从账户页返回时 onMounted 不会重跑
 onActivated(() => {
   if (authStore.isAuthed && Object.keys(scoreMap).length === 0) {
     loadReadHashesFromBackend();
@@ -431,6 +452,10 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 16px;
   padding-bottom: 60px;
+
+  .degraded-banner {
+    border-radius: 8px;
+  }
 
   .stream-card {
     border-radius: 12px;

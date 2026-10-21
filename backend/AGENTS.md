@@ -44,7 +44,7 @@ DailyForYou 从传统单调的“热榜聚合页面”彻底演化为**面向工
 | 维度 | crawler（爬虫服务） | backend（用户服务） | frontend（前端） |
 | :--- | :--- | :--- | :--- |
 | **运行时 / 框架** | Node.js >= 22.5、Hono v4、TypeScript 5 | Node.js >= 22.5、Hono v4、TypeScript 5 | Vue 3.5、Vite 4.5、JavaScript |
-| **持久化与缓存** | 原生 `node:sqlite` / libSQL、NodeCache（进程内） | 原生 `node:sqlite` / libSQL | Pinia persist、LocalStorage |
+| **持久化与缓存** | 原生 `node:sqlite` / libSQL | 原生 `node:sqlite` / libSQL | Pinia persist、LocalStorage |
 | **AI 引擎** | DeepSeek（翻译） | DeepSeek（评分） | - |
 | **鉴权** | 无（公开只读） | 钱包签名登录 + JWT | Bearer Token |
 | **包管理器** | `pnpm` | `pnpm` | `pnpm` |
@@ -67,7 +67,6 @@ flowchart LR
         CRegistry["信源扫描注册\n(registry.ts)"]
         Adapters["43 个信源适配器\n(src/routes/*.ts)"]
         Translator["DeepSeek 并发汉化\n(translator.ts)"]
-        Cache["NodeCache 进程内缓存\n(cache.ts)"]
         NewsRepo["新闻入库\n(db/newsRepo.ts)"]
     end
 
@@ -116,7 +115,7 @@ sequenceDiagram
 
     User->>Front: 打开首页
     Front->>Crawler: GET /{source}（逐个信源加载）
-    Crawler->>Crawler: 抓取 + 翻译 + 去重（NodeCache 命中则跳过）
+    Crawler->>Crawler: 抓取 + 翻译 + 去重（deduplicate.ts 按标题去重）
     Crawler->>DB: 非缓存命中时 upsert news_items
     Crawler-->>Front: 返回资讯列表（每源最多 30 条）
 
@@ -195,7 +194,6 @@ DailyForYou/
 │   │       ├── promptDb.ts           # 每用户 Prompt（含 60s 进程内缓存）
 │   │       ├── authDb.ts             # 用户/身份/nonce
 │   │       └── rateLimit.ts          # 进程内限流
-│   ├── scripts/                      # backup-scores / login-e2e / rollback
 │   ├── Dockerfile / docker-compose.yml
 │   └── .env / .env.example
 │
@@ -224,7 +222,7 @@ DailyForYou/
 1. **在爬虫服务实现适配器**
    - 路径：`crawler/src/routes/<sourceName>.ts`
    - 契约：`export const handleRoute = async (c: ListContext, noCache: boolean): Promise<RouterData>`
-   - 抓取：`import { get, post } from "../utils/getData.js"`（自带 NodeCache 与请求头兜底）
+   - 抓取：`import { get, post } from "../utils/getData.js"`（自带请求头兜底）
    - 解析：JSON 直接用泛型；HTML 用 `cheerio`；RSS 用 `../utils/parseRSS.js`
    - 返回：`RouterData.data` 为 `ListItem[]`，至少包含 `id/title/url`
 2. **自动注册**：`crawler/src/registry.ts` 的 `findTsFiles` 会自动扫描 `routes/`，无需手写 import。
@@ -412,7 +410,4 @@ curl -X POST http://localhost:6690/score \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <token>" \
   -d '{"title":"DeepSeek 发布新模型","desc":"推理成本下降","source":"v2ex"}'
-
-# 一键跑通登录 + 评分 + 跨用户隔离（临时钱包，自动清理）
-cd backend && node scripts/login-e2e.mjs
 ```

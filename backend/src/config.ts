@@ -12,6 +12,11 @@ export type Config = {
   DEEPSEEK_API_KEY: string;
   DEEPSEEK_BASE_URL: string;
   DEEPSEEK_MODEL: string;
+  DEEPSEEK_THINKING: string;
+  DEEPSEEK_REASONING_EFFORT: string;
+  DEEPSEEK_MAX_TOKENS: number;
+  DEEPSEEK_TEMPERATURE: number;
+  DEEPSEEK_JSON_MODE: boolean;
   SQLITE_DB_PATH: string;
   LIBSQL_URL: string;
   LIBSQL_AUTH_TOKEN: string;
@@ -27,6 +32,7 @@ export type Config = {
   SCORE_PROMPT_MAX_LENGTH: number;
   SCORE_RATE_LIMIT_PER_MIN: number;
   PROMPT_TEST_RATE_LIMIT_PER_MIN: number;
+  CRAWL_INTERVAL_MINUTES: number;
 };
 
 // 验证并提取环境变量
@@ -61,6 +67,18 @@ export const config: Config = {
   DEEPSEEK_API_KEY: getEnvVariable("DEEPSEEK_API_KEY") || "",
   DEEPSEEK_BASE_URL: getEnvVariable("DEEPSEEK_BASE_URL") || "https://api.deepseek.com",
   DEEPSEEK_MODEL: getEnvVariable("DEEPSEEK_MODEL") || "deepseek-flash",
+  // 评分策略：准确性优先，默认走最高档思考（max）。降档必须先有同档位自一致性基线 + A/B 数据支撑。
+  // 取值：enabled / disabled / 留空（留空则不下发该字段，走服务端默认=开启思考、effort=high）
+  DEEPSEEK_THINKING: (getEnvVariable("DEEPSEEK_THINKING") ?? "enabled").trim(),
+  // 思考强度：none / low / high / max，留空则不下发；thinking=disabled 时该值会被忽略（none 除外）
+  DEEPSEEK_REASONING_EFFORT: (getEnvVariable("DEEPSEEK_REASONING_EFFORT") ?? "max").trim(),
+  // 输出上限（含思考 token）。0 表示不下发，此时思考模式默认 64K、非思考模式默认 8K。
+  // max 档实测单条思考 + 正文峰值约 1.1K，8192 留足余量，避免截断导致 JSON 解析失败。
+  DEEPSEEK_MAX_TOKENS: getNumericEnvVariable("DEEPSEEK_MAX_TOKENS", 8192),
+  // 采样温度（思考模式下通常被服务端忽略）
+  DEEPSEEK_TEMPERATURE: Number(getEnvVariable("DEEPSEEK_TEMPERATURE") ?? "0.1"),
+  // JSON 模式：自定义 Prompt 未要求输出 JSON 时可能导致空输出，默认关闭
+  DEEPSEEK_JSON_MODE: getBooleanEnvVariable("DEEPSEEK_JSON_MODE", false),
   SQLITE_DB_PATH: getEnvVariable("SQLITE_DB_PATH") || "./data/users.sqlite",
   LIBSQL_URL: getEnvVariable("LIBSQL_URL") || "",
   LIBSQL_AUTH_TOKEN: getEnvVariable("LIBSQL_AUTH_TOKEN") || "",
@@ -74,6 +92,7 @@ export const config: Config = {
   DEFAULT_USER_ID: getNumericEnvVariable("DEFAULT_USER_ID", 1),
   DEFAULT_USER_ADDRESS: getEnvVariable("DEFAULT_USER_ADDRESS") || "",
   SCORE_PROMPT_MAX_LENGTH: getNumericEnvVariable("SCORE_PROMPT_MAX_LENGTH", 20000),
-  SCORE_RATE_LIMIT_PER_MIN: getNumericEnvVariable("SCORE_RATE_LIMIT_PER_MIN", 240),
+  SCORE_RATE_LIMIT_PER_MIN: getNumericEnvVariable("SCORE_RATE_LIMIT_PER_MIN", 600),
   PROMPT_TEST_RATE_LIMIT_PER_MIN: getNumericEnvVariable("PROMPT_TEST_RATE_LIMIT_PER_MIN", 5),
+  CRAWL_INTERVAL_MINUTES: getNumericEnvVariable("CRAWL_INTERVAL_MINUTES", 120),
 };

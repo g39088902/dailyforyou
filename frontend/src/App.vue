@@ -3,10 +3,10 @@
     <n-layout
       embedded
       :native-scrollbar="false"
-      :class="[store.headerFixed ? 'fixed' : null, isStreamPage ? 'stream-layout' : null]"
+      :class="[isStreamPage ? 'stream-layout' : null]"
     >
-      <n-back-top :visibility-height="2" @update:show="backTopChange" />
-      <Header v-if="!isStreamPage" :class="headerShow ? 'show' : null" />
+      <n-back-top :visibility-height="300" />
+      <Header v-if="!isStreamPage" />
       <main>
         <router-view v-slot="{ Component }">
           <keep-alive>
@@ -23,7 +23,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, ref } from "vue";
+import { computed, nextTick, onMounted } from "vue";
 import { useRoute } from "vue-router";
 import { mainStore } from "@/store";
 import { useAuthStore } from "@/store/auth";
@@ -36,26 +36,11 @@ import LoginModal from "@/components/Auth/LoginModal.vue";
 const route = useRoute();
 const store = mainStore();
 const authStore = useAuthStore();
-store.checkNewsUpdate();
+store.loadSources();
 
 const isStreamPage = computed(() => route.path === "/stream" || route.path === "/");
 
-// 顶栏显隐
-const headerShow = ref(false);
-
-// 回顶按钮显隐
-const backTopChange = (val) => {
-  headerShow.value = val;
-};
-
 onMounted(() => {
-  // 写入默认
-  nextTick(() => {
-    if (store.newsArr.length === 0) {
-      store.newsArr = store.defaultNewsArr.map((item) => ({ ...item }));
-    }
-  });
-
   // 未登录状态打开网页时，默认弹窗引导用户登录（可关闭）
   if (!authStore.isAuthed) {
     nextTick(() => {
@@ -68,42 +53,7 @@ onMounted(() => {
 <style lang="scss" scoped>
 .n-layout {
   height: 100%;
-  &.fixed {
-    .header {
-      width: 100%;
-      margin: 0;
-      position: absolute;
-      z-index: 2;
-      top: 0;
-      left: 0;
-      box-sizing: border-box;
-      &.show {
-        height: 70px;
-        border-bottom: 2px solid var(--n-border-color);
-        background-color: var(--n-color);
-        :deep(section) {
-          .logo {
-            img {
-              width: 40px;
-              height: 40px;
-            }
-            .name {
-              span {
-                &:nth-of-type(1) {
-                  font-size: 18px;
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-    main {
-      padding: 118px 5vw 0 5vw;
-    }
-  }
-  &.stream-layout,
-  &.fixed.stream-layout {
+  &.stream-layout {
     main {
       padding: 24px 5vw 0 5vw;
       min-height: calc(100vh - 120px);
@@ -113,13 +63,13 @@ onMounted(() => {
     right: 0;
     top: 0;
     bottom: 0;
-    z-index: 3;
+    z-index: 101;
   }
   main {
-    padding: 0 5vw;
+    padding: 20px 5vw;
     max-width: 1800px;
     margin: 0 auto;
-    min-height: calc(100vh - 238px);
+    min-height: calc(100vh - 200px);
   }
 }
 

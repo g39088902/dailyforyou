@@ -28,13 +28,13 @@
           round
           :bordered="false"
           class="source-tag"
-          @click.stop="$emit('filter-source', item._sourceName)"
+          @click.stop="$emit('filter-source', item._sourceKey)"
         >
           <template #avatar>
             <img
-              :src="`/logo/${item._sourceName}.png`"
+              :src="resolveLogoUrl(item._sourceLogo)"
+              :alt="item._sourceLabel"
               class="tag-logo"
-              @error="(e) => (e.target.style.display = 'none')"
             />
           </template>
           {{ item._sourceLabel }}
@@ -93,6 +93,7 @@
 
 <script setup>
 import { Fire } from "@icon-park/vue-next";
+import { resolveLogoUrl } from "@/api";
 import StreamScoreBadge from "./StreamScoreBadge.vue";
 
 defineProps({

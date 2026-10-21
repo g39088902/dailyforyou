@@ -40,15 +40,6 @@ const routes = [
     },
     component: () => import("@/views/Account.vue"),
   },
-  // 测试页面
-  {
-    path: "/test",
-    name: "test",
-    meta: {
-      title: "test",
-    },
-    component: () => import("@/views/Test.vue"),
-  },
   // 403
   {
     path: "/403",

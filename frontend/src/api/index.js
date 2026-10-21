@@ -1,32 +1,55 @@
 import axios from "@/api/request";
 
-// 榜单数据由后端服务（:6690）从数据库直接供给，不再访问爬虫服务
-const FEED_BASE_URL =
-  import.meta.env.VITE_FEED_API || import.meta.env.VITE_GLOBAL_API;
+// 榜单与信源清单由后端服务（:6690）从数据库直接供给
+export const FEED_BASE_URL =
+  import.meta.env.VITE_FEED_API || import.meta.env.VITE_GLOBAL_API || "";
 
 /**
- * 获取热榜分类数据
- * @param {string} type 热榜分类名称
- * @param {boolean} isNew 是否拉取最新数据
- * @param {object} params 请求参数
- * @returns
+ * 拼接后端下发的图标相对路径（如 /logo/xxx.png）为完整 URL
+ * @param {string} logoPath
+ * @returns {string}
  */
-export const getHotLists = (type, isNew = false, params) => {
-  const path = type.startsWith("cls-")
-    ? "cls"
-    : type.startsWith("jiemian-")
-    ? "jiemian"
-    : type.startsWith("reuters-")
-    ? "reuters"
-    : type.startsWith("jin10-")
-    ? "jin10"
-    : type.startsWith("bloomberg-")
-    ? "bloomberg"
-    : type;
+export const resolveLogoUrl = (logoPath) => {
+  if (!logoPath) return "";
+  if (/^https?:\/\//i.test(logoPath)) return logoPath;
+  const base = String(FEED_BASE_URL || "").replace(/\/+$/, "");
+  const path = logoPath.startsWith("/") ? logoPath : `/${logoPath}`;
+  return `${base}${path}`;
+};
+
+/**
+ * 获取后端动态信源清单与实时状态
+ * @returns {Promise<{ code: number, initialized: boolean, etag: string, generatedAt: string, sources: Array }>}
+ */
+export const getSources = () => {
   return axios({
     method: "GET",
-    url: `/${path}`,
+    url: "/sources",
     baseURL: FEED_BASE_URL,
+    timeout: 15000,
+    silentError: true,
+  });
+};
+
+/**
+ * 获取热榜分类数据（不再包含任何前缀字符串推断，直接使用清单下发的 name 与 params）
+ * @param {string|object} sourceOrName 信源对象 { name, params } 或适配器名称字符串
+ * @param {boolean} isNew 是否拉取最新数据
+ * @param {object} extraParams 额外请求参数
+ * @returns
+ */
+export const getHotLists = (sourceOrName, isNew = false, extraParams) => {
+  const isObj = sourceOrName && typeof sourceOrName === "object";
+  const name = isObj ? sourceOrName.name : sourceOrName;
+  const params = isObj
+    ? { ...(sourceOrName.params || {}), ...(extraParams || {}) }
+    : extraParams || {};
+
+  return axios({
+    method: "GET",
+    url: `/${name}`,
+    baseURL: FEED_BASE_URL,
+    silentError: true,
     params: {
       cache: !isNew,
       ...params,

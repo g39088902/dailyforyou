@@ -1,5 +1,6 @@
 import logger from "../utils/logger.js";
 import { executeSql, queryRows, runBatch } from "./client.js";
+import { seedSourcesFromRegistry } from "./sourcesRepo.js";
 
 interface Migration {
   version: string;
@@ -63,6 +64,84 @@ const MIGRATIONS: Migration[] = [
       await executeSql(
         `CREATE INDEX IF NOT EXISTS idx_news_items_query ON news_items(source_name, sub_type, id DESC)`,
       );
+    },
+  },
+  {
+    version: "c003_sources_registry",
+    description: "信源清单表、图标表、版本握手表与抓取历史表",
+    run: async () => {
+      await executeSql(`
+        CREATE TABLE IF NOT EXISTS sources (
+          key                  TEXT PRIMARY KEY,
+          name                 TEXT NOT NULL,
+          sub_type             TEXT NOT NULL DEFAULT '',
+          params_json          TEXT NOT NULL DEFAULT '{}',
+          label                TEXT NOT NULL,
+          category             TEXT NOT NULL DEFAULT '',
+          type                 TEXT NOT NULL DEFAULT '',
+          link                 TEXT NOT NULL DEFAULT '',
+          logo_url             TEXT NOT NULL DEFAULT '',
+          logo_text            TEXT NOT NULL DEFAULT '',
+          logo_color           TEXT NOT NULL DEFAULT '#5F5E5A',
+          has_logo             INTEGER NOT NULL DEFAULT 0,
+          logo_etag            TEXT NOT NULL DEFAULT '',
+          sort_order           INTEGER NOT NULL DEFAULT 0,
+          default_on           INTEGER NOT NULL DEFAULT 1,
+          enabled              INTEGER NOT NULL DEFAULT 1,
+          retired              INTEGER NOT NULL DEFAULT 0,
+          status               TEXT NOT NULL DEFAULT 'idle',
+          last_started_at      TEXT NOT NULL DEFAULT '',
+          last_finished_at     TEXT NOT NULL DEFAULT '',
+          last_success_at      TEXT NOT NULL DEFAULT '',
+          last_error           TEXT NOT NULL DEFAULT '',
+          items_total          INTEGER NOT NULL DEFAULT 0,
+          items_last_run       INTEGER NOT NULL DEFAULT 0,
+          consecutive_failures INTEGER NOT NULL DEFAULT 0,
+          updated_at           TEXT NOT NULL DEFAULT ''
+        )
+      `);
+      await executeSql(`CREATE INDEX IF NOT EXISTS idx_sources_order ON sources(sort_order)`);
+
+      await executeSql(`
+        CREATE TABLE IF NOT EXISTS source_logos (
+          key         TEXT PRIMARY KEY,
+          mime        TEXT NOT NULL,
+          bytes       BLOB NOT NULL,
+          width       INTEGER NOT NULL DEFAULT 0,
+          height      INTEGER NOT NULL DEFAULT 0,
+          source_file TEXT NOT NULL DEFAULT '',
+          updated_at  TEXT NOT NULL
+        )
+      `);
+
+      await executeSql(`
+        CREATE TABLE IF NOT EXISTS schema_meta (
+          key   TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        )
+      `);
+      await executeSql(
+        `INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('news_schema_version', '3')`,
+      );
+
+      await executeSql(`
+        CREATE TABLE IF NOT EXISTS crawl_runs (
+          id            INTEGER PRIMARY KEY AUTOINCREMENT,
+          run_id        TEXT NOT NULL,
+          source_key    TEXT NOT NULL,
+          started_at    TEXT NOT NULL,
+          finished_at   TEXT NOT NULL DEFAULT '',
+          status        TEXT NOT NULL DEFAULT 'running',
+          items_written INTEGER NOT NULL DEFAULT 0,
+          error         TEXT NOT NULL DEFAULT ''
+        )
+      `);
+      await executeSql(
+        `CREATE INDEX IF NOT EXISTS idx_crawl_runs_key ON crawl_runs(source_key, started_at DESC)`,
+      );
+
+      // 初始数据种子注入
+      await seedSourcesFromRegistry();
     },
   },
 ];

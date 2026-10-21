@@ -3,6 +3,16 @@
 // 评分层级与结果类型
 export type ScoreLayer = "L1" | "L2" | "L3" | "L4" | "L5" | "Uncertain";
 
+export interface ScoreUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  /** 思维链 token（已计入 completionTokens） */
+  reasoningTokens?: number;
+  /** 命中上下文缓存的输入 token */
+  cachedTokens?: number;
+}
+
 export interface ScoreResult {
   id?: number;
   newsHash?: string;
@@ -23,6 +33,7 @@ export interface ScoreResult {
   updatedAt?: string;
   fromCache?: boolean;
   degraded?: boolean;
+  usage?: ScoreUsage | null;
 }
 
 // 鉴权相关

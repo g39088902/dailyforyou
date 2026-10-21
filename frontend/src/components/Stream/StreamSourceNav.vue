@@ -8,25 +8,29 @@
     <div class="source-nav">
       <div
         v-for="source in sources"
-        :key="source.name"
+        :key="source.key"
         class="source-nav-tag"
         :class="{
-          active: currentFilter === source.name,
-          loading: loadingMap[source.name],
+          active: currentFilter === source.key,
+          loading: loadingMap[source.key],
+          disabled: source.enabled === false,
         }"
-        @click="$emit('filter', source.name)"
+        :title="source.enabled === false ? '该信源暂不可用' : source.label"
+        @click="source.enabled !== false && $emit('filter', source.key)"
       >
         <img
-          :src="`/logo/${source.name}.png`"
+          :src="resolveLogoUrl(source.logo)"
+          :alt="source.label"
           class="source-nav-logo"
-          @error="(e) => (e.target.style.display = 'none')"
         />
         <span class="source-nav-label">{{ source.label }}</span>
         <span class="source-nav-count">
           {{
-            loadingMap[source.name]
+            source.enabled === false
+              ? "暂停"
+              : loadingMap[source.key]
               ? "..."
-              : dataMap[source.name]?.data?.length || 0
+              : dataMap[source.key]?.data?.length || 0
           }}
         </span>
       </div>
@@ -35,6 +39,8 @@
 </template>
 
 <script setup>
+import { resolveLogoUrl } from "@/api";
+
 defineProps({
   sources: {
     type: Array,
@@ -106,6 +112,17 @@ defineEmits(["filter"]);
         .source-nav-count {
           background: rgba(255, 255, 255, 0.25);
           color: #fff;
+        }
+      }
+
+      &.disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+        filter: grayscale(1);
+
+        &:hover {
+          opacity: 0.45;
+          transform: none;
         }
       }
 

@@ -44,7 +44,7 @@ DailyForYou 从传统单调的“热榜聚合页面”彻底演化为**面向工
 | 维度 | crawler（爬虫调度器） | backend（用户与新闻服务） | frontend（前端） |
 | :--- | :--- | :--- | :--- |
 | **运行时 / 框架** | Node.js >= 22.5、CLI 任务调度器、TypeScript 5 | Node.js >= 22.5、Hono v4、TypeScript 5 | Vue 3.5、Vite 4.5、JavaScript |
-| **持久化与缓存** | 原生 `node:sqlite` / libSQL、NodeCache（抓取去重） | 原生 `node:sqlite` / libSQL | Pinia persist、LocalStorage |
+| **持久化与缓存** | 原生 `node:sqlite` / libSQL | 原生 `node:sqlite` / libSQL | Pinia persist、LocalStorage |
 | **AI 引擎** | DeepSeek（翻译） | DeepSeek（评分） | - |
 | **鉴权** | 无（无对外 HTTP 端口） | 钱包签名登录 + JWT（新闻接口公开只读） | Bearer Token |
 | **包管理器** | `pnpm` | `pnpm` | `pnpm` |
@@ -196,7 +196,6 @@ DailyForYou/
 │   │       ├── promptDb.ts           # 每用户 Prompt（含 60s 进程内缓存）
 │   │       ├── authDb.ts             # 用户/身份/nonce
 │   │       └── rateLimit.ts          # 进程内限流
-│   ├── scripts/                      # backup-scores / login-e2e / rollback
 │   ├── Dockerfile / docker-compose.yml
 │   └── .env / .env.example
 │
@@ -225,7 +224,7 @@ DailyForYou/
 1. **在爬虫服务实现适配器**
    - 路径：`crawler/src/routes/<sourceName>.ts`
    - 契约：`export const handleRoute = async (c: ListContext, noCache: boolean): Promise<RouterData>`
-   - 抓取：`import { get, post } from "../utils/getData.js"`（自带 NodeCache 与请求头兜底）
+   - 抓取：`import { get, post } from "../utils/getData.js"`（自带请求头兜底）
    - 解析：JSON 直接用泛型；HTML 用 `cheerio`；RSS 用 `../utils/parseRSS.js`
    - 返回：`RouterData.data` 为 `ListItem[]`，至少包含 `id/title/url`
 2. **自动扫描与定时执行**：`crawler/src/runner.ts` 会自动扫描 `routes/` 并执行抓取，也可以在 `DEFAULT_TARGETS` 中补充常用子分类配置。
@@ -419,7 +418,4 @@ curl -X POST http://localhost:6690/score \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <token>" \
   -d '{"title":"DeepSeek 发布新模型","desc":"推理成本下降","source":"v2ex"}'
-
-# 一键跑通登录 + 评分 + 跨用户隔离（临时钱包，自动清理）
-cd backend && node scripts/login-e2e.mjs
 ```

@@ -261,7 +261,57 @@ export interface ScoreCompletionResult {
   parsed: ScoreResult | null;
   latencyMs: number;
   model: string;
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+    /** 思维链 token（计入 completionTokens，是预算的主要泄漏点） */
+    reasoningTokens: number;
+    /** 命中上下文缓存的输入 token（价格约为未命中的 1/25） */
+    cachedTokens: number;
+  } | null;
 }
+
+/**
+ * 组装 Chat Completions 请求体。
+ * 评分场景只需「短 JSON」，因此默认关闭思考模式并限死 max_tokens，
+ * 全部字段由环境变量控制，留空/0 即回退到服务端默认行为。
+ */
+export const buildCompletionPayload = (messages: ReturnType<typeof buildScoreMessages>) => {
+  const payload: Record<string, unknown> = {
+    model: config.DEEPSEEK_MODEL,
+    messages,
+    temperature: Number.isFinite(config.DEEPSEEK_TEMPERATURE) ? config.DEEPSEEK_TEMPERATURE : 0.1,
+  };
+
+  const thinking = config.DEEPSEEK_THINKING.toLowerCase();
+  const effort = config.DEEPSEEK_REASONING_EFFORT.toLowerCase();
+
+  // 归一化，避免下发互相冲突的开关：reasoning_effort=none 等价于关闭思考
+  let effectiveThinking = thinking === "enabled" || thinking === "disabled" ? thinking : "";
+  if (effort === "none") {
+    effectiveThinking = "disabled";
+  }
+
+  if (effectiveThinking) {
+    payload.thinking = { type: effectiveThinking };
+  }
+
+  // 仅在明确开启思考时下发强度；关闭思考时服务端不接受非 none 的强度值
+  if (effort && effort !== "none" && effectiveThinking !== "disabled") {
+    payload.reasoning_effort = effort;
+  }
+
+  if (config.DEEPSEEK_MAX_TOKENS > 0) {
+    payload.max_tokens = config.DEEPSEEK_MAX_TOKENS;
+  }
+
+  if (config.DEEPSEEK_JSON_MODE) {
+    payload.response_format = { type: "json_object" };
+  }
+
+  return payload;
+};
 
 /**
  * 调用 DeepSeek 完成一次评分（供正常评分与 Prompt 试跑复用）
@@ -279,11 +329,7 @@ export const requestScoreCompletion = async (
   const startedAt = Date.now();
   const response = await axios.post(
     `${config.DEEPSEEK_BASE_URL.replace(/\/+$/, "")}/chat/completions`,
-    {
-      model: config.DEEPSEEK_MODEL,
-      messages: buildScoreMessages(systemPrompt, formattedText),
-      temperature: 0.1,
-    },
+    buildCompletionPayload(buildScoreMessages(systemPrompt, formattedText)),
     {
       headers: {
         "Content-Type": "application/json",
@@ -294,11 +340,29 @@ export const requestScoreCompletion = async (
   );
 
   const raw = response?.data?.choices?.[0]?.message?.content || "";
+  const rawUsage = response?.data?.usage;
+  const usage = rawUsage
+    ? {
+        promptTokens: Number(rawUsage.prompt_tokens ?? 0),
+        completionTokens: Number(rawUsage.completion_tokens ?? 0),
+        totalTokens: Number(rawUsage.total_tokens ?? 0),
+        reasoningTokens: Number(
+          rawUsage.completion_tokens_details?.reasoning_tokens ??
+            rawUsage.reasoning_tokens ??
+            0,
+        ),
+        cachedTokens: Number(
+          rawUsage.prompt_cache_hit_tokens ?? rawUsage.prompt_tokens_details?.cached_tokens ?? 0,
+        ),
+      }
+    : null;
+
   return {
     raw,
     parsed: parseScoreResponse(raw),
     latencyMs: Date.now() - startedAt,
     model: config.DEEPSEEK_MODEL,
+    usage,
   };
 };
 
@@ -367,11 +431,18 @@ export const scoreNewsItem = async (
       promptHash: ctx.promptHash,
     });
 
+    const tokenInfo = completion.usage
+      ? ` tokens=in${completion.usage.promptTokens}/out${completion.usage.completionTokens}/think${completion.usage.reasoningTokens}/cache${completion.usage.cachedTokens}`
+      : "";
+
     logger.info(
-      `🎯 [Scorer] 已评分并入库 user=${ctx.userId} (${parsed.score} | ${parsed.layer}): ${formattedText.slice(0, 40)}...`,
+      `🎯 [Scorer] 已评分并入库 user=${ctx.userId} (${parsed.score} | ${parsed.layer}): ${formattedText.slice(0, 40)}...${tokenInfo}`,
     );
 
-    return rowToScoreResult(savedRow, false);
+    return {
+      ...rowToScoreResult(savedRow, false),
+      usage: completion.usage ?? null,
+    };
   } catch (saveError) {
     logger.error(
       `❌ [Scorer] 评分入库失败 user=${ctx.userId}: ${saveError instanceof Error ? saveError.message : "Unknown error"}`,
@@ -385,6 +456,7 @@ export const scoreNewsItem = async (
       isUserModified: false,
       isRead: false,
       fromCache: false,
+      usage: completion.usage ?? null,
     };
   }
 };
@@ -536,7 +608,7 @@ export const scoreNewsBatch = async <T extends string | ScoreInputItem>(
     return [];
   }
 
-  const concurrency = Math.max(1, Math.min(options.concurrency || 5, 10));
+  const concurrency = Math.max(1, Math.min(options.concurrency || 10, 20));
   const results = new Array(items.length);
   let currentIndex = 0;
 

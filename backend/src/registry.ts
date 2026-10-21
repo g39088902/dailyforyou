@@ -98,7 +98,6 @@ app.get("/score", async (c) => {
     return c.json({
       code: 200,
       message: "评分成功",
-      ...result,
       data: result,
     });
   } catch (error) {
@@ -193,8 +192,7 @@ app.post("/score", async (c) => {
     return c.json({
       code: 200,
       message: "评分成功",
-      ...result,
-      data: typeof input === "object" && input !== null ? { ...input, ...result } : result,
+      data: result,
     });
   } catch (error) {
     const msg = error instanceof Error ? error.message : "Unknown error";
@@ -281,7 +279,6 @@ const handleManualScoreUpdate = async (c: any) => {
     return c.json({
       code: 200,
       message: result.isUserModified ? "用户评分修正已保存" : "已重置为 AI 原始评分",
-      ...result,
       data: result,
     });
   } catch (error) {
@@ -351,7 +348,6 @@ const handleNewsReadStatusUpdate = async (c: any) => {
     return c.json({
       code: 200,
       message: result.isRead ? "已标记为已读" : "已标记为未读",
-      ...result,
       data: result,
     });
   } catch (error) {

@@ -1,23 +1,16 @@
 import axios from "axios";
 import { config } from "../config.js";
-import { getCache, setCache } from "./cache.js";
 import logger from "./logger.js";
-import crypto from "crypto";
 
 export interface TranslateOptions {
   texts: string[];
   targetLang?: string;
   sourceLang?: string;
+  /** @deprecated 进程内缓存已移除，保留字段仅用于兼容既有调用方 */
   cacheTtl?: number;
+  /** @deprecated 进程内缓存已移除，保留字段仅用于兼容既有调用方 */
   noCache?: boolean;
 }
-
-/**
- * 计算文本哈希作为缓存 key 的一部分
- */
-const hashText = (text: string): string => {
-  return crypto.createHash("md5").update(text).digest("hex").slice(0, 16);
-};
 
 /**
  * 翻译单个或多个文本
@@ -27,7 +20,7 @@ const hashText = (text: string): string => {
  * @returns 对应顺序翻译后的纯文本数组
  */
 export const translateTexts = async (options: TranslateOptions): Promise<string[]> => {
-  const { texts, targetLang = "zh-CN", sourceLang = "en", cacheTtl = config.CACHE_TTL, noCache = false } = options;
+  const { texts, targetLang = "zh-CN", sourceLang = "en" } = options;
 
   if (!texts || texts.length === 0) {
     return [];
@@ -43,7 +36,6 @@ export const translateTexts = async (options: TranslateOptions): Promise<string[
   const pendingIndices: number[] = [];
   const pendingTexts: string[] = [];
 
-  // 1. 检查单条缓存，避免重复翻译消耗 token
   for (let i = 0; i < texts.length; i++) {
     const originalText = texts[i];
     if (!originalText || !originalText.trim()) {
@@ -51,25 +43,16 @@ export const translateTexts = async (options: TranslateOptions): Promise<string[
       continue;
     }
 
-    const cacheKey = `translate:${targetLang}:${hashText(originalText)}`;
-    if (!noCache) {
-      const cached = await getCache(cacheKey);
-      if (cached && typeof cached.data === "string") {
-        results[i] = cached.data;
-        continue;
-      }
-    }
-
     pendingIndices.push(i);
     pendingTexts.push(originalText);
   }
 
-  // 全部命中缓存
+  // 没有需要翻译的文本
   if (pendingIndices.length === 0) {
     return results;
   }
 
-  // 2. 将待翻译文本切片并并发调用 DeepSeek API 进行翻译（每批最多 3 条）
+  // 1. 将待翻译文本切片并并发调用 DeepSeek API 进行翻译（每批最多 3 条）
   const CHUNK_SIZE = 3;
   const chunks: { chunkIndices: number[]; chunkTexts: string[] }[] = [];
   for (let offset = 0; offset < pendingIndices.length; offset += CHUNK_SIZE) {
@@ -131,22 +114,9 @@ ${JSON.stringify(chunkTexts)}`;
           logger.error(`❌ [Translator] Failed to parse DeepSeek response as JSON: ${content}`);
         }
 
-        const now = new Date().toISOString();
-
         for (let k = 0; k < chunkIndices.length; k++) {
           const originalIdx = chunkIndices[k];
-          const translated = translatedList[k] || chunkTexts[k];
-          results[originalIdx] = translated;
-
-          // 写入缓存（即使单条写入缓存异常也不影响已翻译结果）
-          try {
-            const cacheKey = `translate:${targetLang}:${hashText(chunkTexts[k])}`;
-            await setCache(cacheKey, { data: translated, updateTime: now }, cacheTtl);
-          } catch (cacheErr) {
-            logger.warn(
-              `⚠️ [Translator] Failed to cache translation item: ${cacheErr instanceof Error ? cacheErr.message : "Unknown error"}`,
-            );
-          }
+          results[originalIdx] = translatedList[k] || chunkTexts[k];
         }
 
         logger.info(`🌐 [Translator] Successfully translated batch of ${chunkIndices.length} items with DeepSeek.`);

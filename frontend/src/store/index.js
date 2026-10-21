@@ -1,4 +1,38 @@
 import { defineStore } from "pinia";
+import { getSources } from "@/api";
+
+let retryTimer = null;
+let retryAttempt = 0;
+
+/**
+ * 一次性迁移老版本 localStorage 中的 newsArr 用户偏好（开关与排序）
+ */
+const migrateLegacyPrefsIfNeeded = (currentPrefs) => {
+  if (currentPrefs && Object.keys(currentPrefs).length > 0) {
+    return currentPrefs;
+  }
+  try {
+    const raw = localStorage.getItem("mainData");
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed?.newsArr) || parsed.newsArr.length === 0) {
+      return {};
+    }
+    const migrated = {};
+    parsed.newsArr.forEach((item, index) => {
+      const k = item?.key || item?.name;
+      if (k) {
+        migrated[k] = {
+          show: typeof item.show === "boolean" ? item.show : true,
+          order: typeof item.order === "number" ? index : index,
+        };
+      }
+    });
+    return migrated;
+  } catch {
+    return {};
+  }
+};
 
 export const mainStore = defineStore("mainData", {
   state: () => {
@@ -6,196 +40,21 @@ export const mainStore = defineStore("mainData", {
       // 系统主题
       siteTheme: "light",
       siteThemeAuto: true,
-      // 新闻类别
-      defaultNewsArr: [
-        {
-          label: "哔哩哔哩",
-          name: "bilibili",
-          order: 0,
-          show: true,
-        },
-        {
-          label: "抖音",
-          name: "douyin",
-          order: 1,
-          show: true,
-        },
-        {
-          label: "快手",
-          name: "kuaishou",
-          order: 2,
-          show: true,
-        },
-        {
-          label: "36氪",
-          name: "36kr",
-          order: 3,
-          show: true,
-        },
-        {
-          label: "少数派",
-          name: "sspai",
-          order: 4,
-          show: true,
-        },
-        {
-          label: "IT之家",
-          name: "ithome",
-          order: 5,
-          show: true,
-        },
-        {
-          label: "澎湃新闻",
-          name: "thepaper",
-          order: 6,
-          show: true,
-        },
-        {
-          label: "今日头条",
-          name: "toutiao",
-          order: 7,
-          show: true,
-        },
-        {
-          label: "稀土掘金",
-          name: "juejin",
-          order: 8,
-          show: true,
-        },
-        {
-          label: "腾讯新闻",
-          name: "qq-news",
-          order: 9,
-          show: true,
-        },
-        {
-          label: "财联社电报",
-          name: "cls",
-          order: 10,
-          show: true,
-        },
-        {
-          label: "界面快报",
-          name: "jiemian",
-          order: 11,
-          show: true,
-        },
-        {
-          label: "界面热门",
-          name: "jiemian-hot",
-          params: {
-            type: "hot",
-          },
-          order: 12,
-          show: true,
-        },
-        {
-          label: "豆瓣讨论小组",
-          name: "douban-group",
-          order: 13,
-          show: true,
-        },
-        {
-          label: "NGA",
-          name: "ngabbs",
-          order: 14,
-          show: true,
-        },
-        {
-          label: "HelloGitHub",
-          name: "hellogithub",
-          order: 15,
-          show: true,
-        },
-        {
-          label: "GitHub",
-          name: "github",
-          order: 16,
-          show: true,
-        },
-        {
-          label: "V2EX",
-          name: "v2ex",
-          order: 17,
-          show: true,
-        },
-        {
-          label: "Hacker News",
-          name: "hackernews",
-          order: 18,
-          show: true,
-        },
-        {
-          label: "路透社·要闻",
-          name: "reuters",
-          order: 19,
-          show: true,
-        },
-        {
-          label: "路透社·国际",
-          name: "reuters-world",
-          params: {
-            type: "world",
-          },
-          order: 20,
-          show: true,
-        },
-        {
-          label: "路透社·商业",
-          name: "reuters-business",
-          params: {
-            type: "business",
-          },
-          order: 21,
-          show: true,
-        },
-        {
-          label: "路透社·科技",
-          name: "reuters-technology",
-          params: {
-            type: "technology",
-          },
-          order: 22,
-          show: true,
-        },
-        {
-          label: "路透社·金融",
-          name: "reuters-markets",
-          params: {
-            type: "markets",
-          },
-          order: 23,
-          show: true,
-        },
-        {
-          label: "金十数据·要闻",
-          name: "jin10-important",
-          params: {
-            type: "important",
-          },
-          order: 24,
-          show: true,
-        },
-        {
-          label: "彭博社·全球",
-          name: "bloomberg-world",
-          params: {
-            type: "world",
-          },
-          order: 25,
-          show: true,
-        },
-        {
-          label: "彭博社·市场",
-          name: "bloomberg-markets",
-          params: {
-            type: "markets",
-          },
-          order: 26,
-          show: true,
-        },
-      ],
-      newsArr: [],
+
+      // 用户对各信源的个性化偏好：{ [key]: { show: boolean, order: number } }
+      sourcePrefs: {},
+      // 上次成功从 GET /sources 获取的清单快照：{ etag: string, sources: Array }
+      sourcesSnapshot: {
+        etag: "",
+        sources: [],
+      },
+
+      // 运行时合并后的信源列表（按用户排序排列）
+      sources: [],
+      // 信源清单加载状态：'idle' | 'loading' | 'ready' | 'degraded' | 'uninitialized'
+      sourcesStatus: "idle",
+      sourcesLoading: false,
+
       // 链接跳转方式
       linkOpenType: "open",
       // 页头固定
@@ -216,60 +75,184 @@ export const mainStore = defineStore("mainData", {
   actions: {
     // 更改系统主题
     setSiteTheme(val) {
-      $message.info(`已切换至${val === "dark" ? "深色模式" : "浅色模式"}`, {
-        showIcon: false,
-      });
+      window.$message?.info(
+        `已切换至${val === "dark" ? "深色模式" : "浅色模式"}`,
+        {
+          showIcon: false,
+        }
+      );
       this.siteTheme = val;
       this.siteThemeAuto = false;
     },
-    // 检查更新
-    checkNewsUpdate() {
-      const mainData = JSON.parse(localStorage.getItem("mainData"));
-      let updatedNum = 0;
-      if (!mainData) {
-        if (this.newsArr.length === 0) {
-          this.newsArr = this.defaultNewsArr.map((item) => ({ ...item }));
-        }
-        return false;
+
+    // 将 snapshot.sources 与用户 sourcePrefs 合并生成运行时 this.sources
+    rebuildMergedSources() {
+      const snapshotList = Array.isArray(this.sourcesSnapshot?.sources)
+        ? this.sourcesSnapshot.sources
+        : [];
+      const prefs = this.sourcePrefs || {};
+
+      this.sources = snapshotList
+        .map((s) => {
+          const pref = prefs[s.key];
+          const defaultOrder = typeof s.order === "number" ? s.order : 0;
+          const defaultShow = typeof s.defaultOn === "boolean" ? s.defaultOn : true;
+          return {
+            ...s,
+            defaultOrder,
+            show: typeof pref?.show === "boolean" ? pref.show : defaultShow,
+            order: typeof pref?.order === "number" ? pref.order : defaultOrder,
+          };
+        })
+        .sort((a, b) => {
+          if (a.order !== b.order) return a.order - b.order;
+          return String(a.key).localeCompare(String(b.key));
+        });
+    },
+
+    // 从后端加载动态信源清单（支持两级降级与后台指数退避重试）
+    async loadSources({ isRetry = false } = {}) {
+      if (retryTimer && !isRetry) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
       }
-      console.log("列表尝试更新", this.defaultNewsArr, this.newsArr);
-      // 执行比较并迁移
-      if (this.newsArr.length > 0) {
-        // 过滤掉已移除的分类，并保留用户自定义的排序和开关状态
-        this.newsArr = this.newsArr
-          .filter((news) =>
-            this.defaultNewsArr.some((item) => item.name === news.name)
-          )
-          .map((news) => {
-            const defaultItem = this.defaultNewsArr.find(
-              (item) => item.name === news.name
-            );
-            return {
-              ...defaultItem,
-              ...news,
-              label: defaultItem.label,
-              order: defaultItem.order,
-              params: defaultItem.params,
-              show: typeof news.show === "boolean" ? news.show : true,
-            };
-          });
-        for (const newItem of this.defaultNewsArr) {
-          const exists = this.newsArr.some(
-            (news) => newItem.name === news.name
-          );
-          if (!exists) {
-            console.log("列表有更新：", newItem);
-            updatedNum++;
-            this.newsArr.push({ ...newItem, show: true });
+
+      // 首次初始化时兼容读取旧版 localStorage 偏好
+      this.sourcePrefs = migrateLegacyPrefsIfNeeded(this.sourcePrefs);
+
+      // 若本地已有快照，先立即构建合并列表，让首屏零等待渲染
+      if (
+        Array.isArray(this.sourcesSnapshot?.sources) &&
+        this.sourcesSnapshot.sources.length > 0 &&
+        this.sources.length === 0
+      ) {
+        this.rebuildMergedSources();
+      }
+
+      this.sourcesLoading = true;
+      try {
+        const res = await getSources();
+        if (res && res.code === 200) {
+          if (res.initialized === false || !Array.isArray(res.sources) || res.sources.length === 0) {
+            this.sources = [];
+            this.sourcesStatus = "uninitialized";
+            return false;
           }
+
+          retryAttempt = 0;
+          if (retryTimer) {
+            clearTimeout(retryTimer);
+            retryTimer = null;
+          }
+
+          this.sourcesSnapshot = {
+            etag: res.etag || "",
+            sources: res.sources,
+          };
+          this.rebuildMergedSources();
+          this.sourcesStatus = "ready";
+          return true;
         }
-        if (updatedNum) {
-          window.$message?.success(`成功更新 ${updatedNum} 个榜单数据`);
+        throw new Error(res?.message || "Invalid /sources response");
+      } catch (err) {
+        console.warn("拉取 /sources 清单失败:", err);
+        const hasSnapshot =
+          Array.isArray(this.sourcesSnapshot?.sources) &&
+          this.sourcesSnapshot.sources.length > 0;
+
+        if (hasSnapshot) {
+          this.rebuildMergedSources();
+          this.sourcesStatus = "degraded";
+          this.scheduleBackgroundRetry();
+          return true;
+        } else {
+          this.sources = [];
+          this.sourcesStatus = "uninitialized";
+          return false;
         }
-      } else {
-        console.log("列表无内容，写入默认");
-        this.newsArr = this.defaultNewsArr.map((item) => ({ ...item }));
+      } finally {
+        this.sourcesLoading = false;
       }
+    },
+
+    // 后台指数退避重试拉取 /sources
+    scheduleBackgroundRetry() {
+      if (retryTimer) return;
+      retryAttempt = Math.min(retryAttempt + 1, 6);
+      const delayMs = Math.min(3000 * Math.pow(2, retryAttempt - 1), 60000);
+      retryTimer = setTimeout(() => {
+        retryTimer = null;
+        this.loadSources({ isRetry: true });
+      }, delayMs);
+    },
+
+    // 更新单个信源偏好
+    setSourcePref(key, partialPref = {}) {
+      if (!key) return;
+      const prev = this.sourcePrefs[key] || {};
+      this.sourcePrefs = {
+        ...this.sourcePrefs,
+        [key]: {
+          ...prev,
+          ...partialPref,
+        },
+      };
+      this.rebuildMergedSources();
+    },
+
+    // 从设置页拖拽/开关同步完整的 sources 顺序与显隐到 sourcePrefs
+    syncPrefsFromSources(newSourcesList) {
+      if (!Array.isArray(newSourcesList)) return;
+      const nextPrefs = { ...(this.sourcePrefs || {}) };
+      newSourcesList.forEach((item, index) => {
+        if (!item?.key) return;
+        nextPrefs[item.key] = {
+          show: Boolean(item.show),
+          order: index,
+        };
+      });
+      this.sourcePrefs = nextPrefs;
+      this.rebuildMergedSources();
+    },
+
+    // 全选 / 全不选所有信源
+    setAllSourcesShow(show) {
+      const nextPrefs = { ...(this.sourcePrefs || {}) };
+      this.sources.forEach((item, index) => {
+        nextPrefs[item.key] = {
+          show: Boolean(show),
+          order: typeof item.order === "number" ? item.order : index,
+        };
+      });
+      this.sourcePrefs = nextPrefs;
+      this.rebuildMergedSources();
+    },
+
+    // 恢复默认排序与默认开关
+    restoreDefaultSources() {
+      this.sourcePrefs = {};
+      this.rebuildMergedSources();
+    },
+
+    // 当某个信源请求返回 404 unknown source 时，将其从本地列表与快照移除并提示“信源已下线”
+    removeOfflineSource(key) {
+      if (!key) return;
+      const target = this.sources.find((s) => s.key === key);
+      this.sources = this.sources.filter((s) => s.key !== key);
+      if (Array.isArray(this.sourcesSnapshot?.sources)) {
+        this.sourcesSnapshot = {
+          ...this.sourcesSnapshot,
+          sources: this.sourcesSnapshot.sources.filter((s) => s.key !== key),
+        };
+      }
+      if (this.sourcePrefs && this.sourcePrefs[key]) {
+        const nextPrefs = { ...this.sourcePrefs };
+        delete nextPrefs[key];
+        this.sourcePrefs = nextPrefs;
+      }
+      window.$message?.warning(
+        target?.label ? `信源「${target.label}」已下线` : "信源已下线"
+      );
     },
   },
   persist: [
@@ -278,7 +261,8 @@ export const mainStore = defineStore("mainData", {
       paths: [
         "siteTheme",
         "siteThemeAuto",
-        "newsArr",
+        "sourcePrefs",
+        "sourcesSnapshot",
         "linkOpenType",
         "headerFixed",
         "listFontSize",

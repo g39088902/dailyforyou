@@ -1,6 +1,5 @@
 import type { Get, Post } from "../types.js";
 import { config } from "../config.js";
-import { getCache, setCache, delCache } from "./cache.js";
 import logger from "./logger.js";
 import axios from "axios";
 
@@ -36,6 +35,7 @@ request.interceptors.response.use(
 );
 
 export interface RequestResult<T = unknown> {
+  /** 历史字段：进程内缓存移除后恒为 false，保留是为了不改变适配器的返回结构 */
   fromCache: boolean;
   updateTime: string;
   data: T;
@@ -43,38 +43,15 @@ export interface RequestResult<T = unknown> {
 
 // GET
 export const get = async <T = unknown>(options: Get): Promise<RequestResult<T>> => {
-  const {
-    url,
-    headers,
-    params,
-    noCache,
-    ttl = config.CACHE_TTL,
-    originaInfo = false,
-    responseType = "json",
-  } = options;
+  // noCache / ttl 仍在 Get 类型中保留：130+ 个适配器都在传，删字段会波及全部适配器。
+  // 进程内缓存已移除，这两个参数不再产生任何行为。
+  const { url, headers, params, originaInfo = false, responseType = "json" } = options;
   logger.info(`🌐 [GET] ${url}`);
   try {
-    // 检查缓存
-    if (noCache) await delCache(url);
-    else {
-      const cachedData = await getCache(url);
-      if (cachedData) {
-        logger.info("💾 [CHCHE] The request is cached");
-        return {
-          fromCache: true,
-          updateTime: cachedData.updateTime,
-          data: cachedData.data as T,
-        };
-      }
-    }
-    // 缓存不存在时请求接口
     const response = await request.get(url, { headers, params, responseType });
     const responseData = response?.data || response;
-    // 存储新获取的数据到缓存
     const updateTime = new Date().toISOString();
     const data = originaInfo ? response : responseData;
-    await setCache(url, { data, updateTime }, ttl);
-    // 返回数据
     logger.info(`✅ [${response?.status}] request was successful`);
     return { fromCache: false, updateTime, data: data as T };
   } catch (error) {
@@ -85,28 +62,13 @@ export const get = async <T = unknown>(options: Get): Promise<RequestResult<T>> 
 
 // POST
 export const post = async <T = unknown>(options: Post): Promise<RequestResult<T>> => {
-  const { url, headers, body, noCache, ttl = config.CACHE_TTL, originaInfo = false } = options;
+  const { url, headers, body, originaInfo = false } = options;
   logger.info(`🌐 [POST] ${url}`);
   try {
-    // 检查缓存
-    if (noCache) await delCache(url);
-    else {
-      const cachedData = await getCache(url);
-      if (cachedData) {
-        logger.info("💾 [CHCHE] The request is cached");
-        return { fromCache: true, updateTime: cachedData.updateTime, data: cachedData.data as T };
-      }
-    }
-    // 缓存不存在时请求接口
     const response = await request.post(url, body, { headers });
     const responseData = response?.data || response;
-    // 存储新获取的数据到缓存
     const updateTime = new Date().toISOString();
     const data = originaInfo ? response : responseData;
-    if (!noCache) {
-      await setCache(url, { data, updateTime }, ttl);
-    }
-    // 返回数据
     logger.info(`✅ [${response?.status}] request was successful`);
     return { fromCache: false, updateTime, data: data as T };
   } catch (error) {

@@ -14,15 +14,23 @@ export function useStreamSources({ onBeforeLoadAll, onSourceReady } = {}) {
 
   const isAborted = () => abortController.aborted;
 
+  // 用户在设置中开启的全部信源（含 enabled: false，供顶部导航展示灰显）
+  const visibleSources = computed(() => {
+    return store.sources.filter((item) => Boolean(item.show));
+  });
+
+  // 实际可拉取数据的活跃信源（排除 enabled === false 的暂不可用信源）
   const activeSources = computed(() => {
-    return store.newsArr.filter((item) => Boolean(item.show));
+    return store.sources.filter(
+      (item) => Boolean(item.show) && item.enabled !== false
+    );
   });
 
   const sourceCount = computed(() => activeSources.value.length);
 
   const loadedSourcesCount = computed(() => {
     return activeSources.value.filter(
-      (s) => !sourceLoadingMap[s.name] && sourceDataMap[s.name]
+      (s) => !sourceLoadingMap[s.key] && sourceDataMap[s.key]
     ).length;
   });
 
@@ -34,11 +42,16 @@ export function useStreamSources({ onBeforeLoadAll, onSourceReady } = {}) {
     );
   });
 
-  const filterBySource = (sourceName) => {
-    if (currentSourceFilter.value === sourceName) {
+  const filterBySource = (sourceKey) => {
+    if (!sourceKey) return;
+    const target = store.sources.find((s) => s.key === sourceKey);
+    if (target && target.enabled === false) {
+      return;
+    }
+    if (currentSourceFilter.value === sourceKey) {
       currentSourceFilter.value = null;
     } else {
-      currentSourceFilter.value = sourceName;
+      currentSourceFilter.value = sourceKey;
     }
   };
 
@@ -51,6 +64,12 @@ export function useStreamSources({ onBeforeLoadAll, onSourceReady } = {}) {
     const currentAbort = { aborted: false };
     abortController = currentAbort;
 
+    // 若清单尚未就绪或强制刷新，先拉取一次最新 /sources
+    if (isNew || (store.sources.length === 0 && store.sourcesStatus === "idle")) {
+      await store.loadSources();
+      if (currentAbort.aborted) return;
+    }
+
     const runId = onBeforeLoadAll ? onBeforeLoadAll({ isNew }) : 0;
 
     const sources = activeSources.value;
@@ -61,7 +80,7 @@ export function useStreamSources({ onBeforeLoadAll, onSourceReady } = {}) {
     }
 
     const hasUnloadedSource =
-      isNew || sources.some((s) => !sourceDataMap[s.name]);
+      isNew || sources.some((s) => !sourceDataMap[s.key]);
     if (hasUnloadedSource) {
       isLoading.value = true;
     }
@@ -72,27 +91,37 @@ export function useStreamSources({ onBeforeLoadAll, onSourceReady } = {}) {
       const source = sources[i];
 
       // 非强制刷新且已有缓存数据时，直接复用缓存并按当前排序入队未打分条目
-      if (!isNew && sourceDataMap[source.name]?.code === 200) {
-        sourceLoadingMap[source.name] = false;
-        onSourceReady?.(source, sourceDataMap[source.name].data, false, runId);
+      if (!isNew && sourceDataMap[source.key]?.code === 200) {
+        sourceLoadingMap[source.key] = false;
+        onSourceReady?.(source, sourceDataMap[source.key].data, false, runId);
         continue;
       }
 
-      sourceLoadingMap[source.name] = true;
+      sourceLoadingMap[source.key] = true;
       currentFetchingSourceLabel.value = source.label;
 
       try {
-        const res = await getHotLists(source.name, isNew, source.params);
+        const res = await getHotLists(source, isNew);
         if (currentAbort.aborted) break;
 
         if (res && res.code === 200) {
-          sourceDataMap[source.name] = res;
+          sourceDataMap[source.key] = res;
           onSourceReady?.(source, res.data, isNew, runId);
+        } else if (res && res.code === 404) {
+          delete sourceDataMap[source.key];
+          store.removeOfflineSource(source.key);
         }
       } catch (err) {
-        console.error(`信源 ${source.label} 加载失败:`, err);
+        if (currentAbort.aborted) break;
+        const status = err?.response?.status || err?.response?.data?.code;
+        if (status === 404) {
+          delete sourceDataMap[source.key];
+          store.removeOfflineSource(source.key);
+        } else {
+          console.error(`信源 ${source.label} 加载失败:`, err);
+        }
       } finally {
-        sourceLoadingMap[source.name] = false;
+        sourceLoadingMap[source.key] = false;
       }
     }
 
@@ -102,13 +131,13 @@ export function useStreamSources({ onBeforeLoadAll, onSourceReady } = {}) {
     }
   };
 
-  // 监听设置中信源排序或开启状态的变化，实时同步流式浏览
+  // 监听设置中信源排序、开启状态或后端清单更新的变化，实时同步流式浏览
   watch(
-    () => activeSources.value.map((s) => s.name).join(","),
+    () => activeSources.value.map((s) => s.key).join(","),
     () => {
       if (
         currentSourceFilter.value &&
-        !activeSources.value.some((s) => s.name === currentSourceFilter.value)
+        !activeSources.value.some((s) => s.key === currentSourceFilter.value)
       ) {
         currentSourceFilter.value = null;
       }
@@ -122,6 +151,7 @@ export function useStreamSources({ onBeforeLoadAll, onSourceReady } = {}) {
     sourceLoadingMap,
     isLoading,
     currentFetchingSourceLabel,
+    visibleSources,
     activeSources,
     sourceCount,
     loadedSourcesCount,

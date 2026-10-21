@@ -27,9 +27,15 @@ SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=10)
 deploy_backend() {
   info "构建用户服务"
   (cd "$ROOT/backend" && pnpm build) || fail "backend 构建失败"
+  # 防呆：tsconfig 的 rootDir/include 一旦被改动，产物会变成 dist/src/index.js，
+  # 而 PM2 指向 dist/index.js —— 此时部署看似成功、实际仍在跑旧代码。
+  [ -f "$ROOT/backend/dist/index.js" ] || fail "构建产物缺少 dist/index.js（检查 tsconfig 的 rootDir/include）"
 
   info "上传编译产物"
-  rsync -az --timeout=60 "$ROOT/backend/dist" "$ROOT/backend/package.json" \
+  # dist 单独用 --delete 同步，清掉历史遗留的旧结构（如 dist/src）避免误判线上代码。
+  rsync -az --timeout=60 --delete "$ROOT/backend/dist/" "$REMOTE:$REMOTE_DIR/back/dist/" \
+    || fail "上传 dist 失败"
+  rsync -az --timeout=60 "$ROOT/backend/package.json" \
     "$ROOT/backend/pnpm-lock.yaml" "$ROOT/backend/ecosystem.config.cjs" \
     "$REMOTE:$REMOTE_DIR/back/" || fail "上传失败"
 
@@ -115,9 +121,16 @@ health_check() {
   info "健康检查"
   expect_code "/api/auth/providers" "200" "/api/auth/providers"
   expect_code "/api/score" "401" "/api/score（鉴权未生效）"
-  expect_code "/api/bilibili?limit=1" "200" "/api/bilibili"
+  expect_code "/api/sources" "200" "/api/sources（动态信源清单）"
+  expect_code "/api/logo/reuters-world.png" "200" "/api/logo/reuters-world.png（动态图标）"
+  expect_code "/api/health" "200" "/api/health（综合健康探针）"
 
-  ok "站点 $SITE 正常（/api/auth 200，/api/score 401 已锁定，/api/bilibili 200 数据库新闻供给就绪）"
+  # 确认爬虫状态正常
+  local health_resp
+  health_resp=$(curl -s -m 10 "$SITE/api/health")
+  info "服务器健康状态: $health_resp"
+
+  ok "站点 $SITE 正常（/api/sources, /api/logo, /api/health, /api/auth 均就绪）"
 }
 
 case "$TARGET" in

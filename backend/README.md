@@ -51,14 +51,6 @@ pnpm dev                   # http://localhost:6690
 | POST | `/account/prompt/test` | 试跑一次，不落库 |
 | GET/POST/PUT/PATCH | `/score*` | 评分、缓存查询、手动修正、已读同步 |
 
-## 脚本
-
-```bash
-node scripts/backup-scores.mjs          # 迁移前备份
-node scripts/login-e2e.mjs              # 临时钱包跑通登录+评分+隔离（自动清理）
-node scripts/rollback-user-states.mjs --confirm   # 紧急回灌到旧表
-```
-
 ## 多用户约定
 
 - 评分缓存命中条件：`ai_score >= 0 && prompt_hash == md5(当前 Prompt)`，或 `is_user_modified = 1`。

@@ -3,7 +3,7 @@ import { scoreNews, queryCachedScoresBatch, updateManualScore } from "@/api";
 import { useAuthStore } from "@/store/auth";
 import { AUTH_EVENTS, emitAuthEvent } from "@/utils/authEvents";
 
-export const MAX_SCORE_CONCURRENCY = 5;
+export const MAX_SCORE_CONCURRENCY = 10;
 
 export function useStreamScoring({ onScoreReadSync, isAborted = () => false } = {}) {
   const authStore = useAuthStore();
@@ -221,7 +221,8 @@ export function useStreamScoring({ onScoreReadSync, isAborted = () => false } = 
     const tasksToProcess = [];
 
     items.forEach((item, index) => {
-      const uniqueKey = `${source.name}-${item.id || item.url || index}`;
+      const sourceKey = source.key || source.name;
+      const uniqueKey = `${sourceKey}-${item.id || item.url || index}`;
       const existing = scoreMap[uniqueKey] || pendingScoreUpdates.get(uniqueKey);
 
       // 非强制刷新时，已完成打分的条目直接复用

@@ -1,109 +1,515 @@
+import crypto from "node:crypto";
 import logger from "./logger.js";
-import { queryRows, queryOne, executeSql } from "../db/client.js";
+import { config } from "../config.js";
+import { queryRows, queryOne } from "../db/client.js";
 
-export interface SourceMeta {
-  sourceName: string;
-  subType?: string;
-  title: string;
-  type: string;
-  description?: string;
-  link?: string;
+export const EXPECTED_NEWS_SCHEMA = 3;
+
+const CACHE_TTL_MS = 60_000;
+
+export interface SourceStats {
+  total: number;
+  lastSuccessAt: string;
+  stale: boolean;
+  status: string;
+  consecutiveFailures: number;
 }
 
-/** 预置信源元数据字典 */
-export const SOURCE_METADATA_MAP: Record<string, SourceMeta> = {
-  bilibili: { sourceName: "bilibili", title: "哔哩哔哩", type: "热门视频", link: "https://www.bilibili.com" },
-  douyin: { sourceName: "douyin", title: "抖音", type: "热搜榜", link: "https://www.douyin.com" },
-  kuaishou: { sourceName: "kuaishou", title: "快手", type: "热榜", link: "https://www.kuaishou.com" },
-  "36kr": { sourceName: "36kr", title: "36氪", type: "人气榜", link: "https://36kr.com" },
-  sspai: { sourceName: "sspai", title: "少数派", type: "热门文章", link: "https://sspai.com" },
-  ithome: { sourceName: "ithome", title: "IT之家", type: "日榜", link: "https://www.ithome.com" },
-  thepaper: { sourceName: "thepaper", title: "澎湃新闻", type: "热榜", link: "https://www.thepaper.cn" },
-  toutiao: { sourceName: "toutiao", title: "今日头条", type: "热榜", link: "https://www.toutiao.com" },
-  juejin: { sourceName: "juejin", title: "稀土掘金", type: "综合榜", link: "https://juejin.cn" },
-  "qq-news": { sourceName: "qq-news", title: "腾讯新闻", type: "热点精选", link: "https://news.qq.com" },
-  cls: { sourceName: "cls", title: "财联社电报", type: "电报", link: "https://www.cls.cn/telegraph" },
-  jiemian: { sourceName: "jiemian", title: "界面快报", type: "快报", link: "https://www.jiemian.com" },
-  "jiemian:hot": { sourceName: "jiemian", subType: "hot", title: "界面热门", type: "热门", link: "https://www.jiemian.com" },
-  "douban-group": { sourceName: "douban-group", title: "豆瓣讨论小组", type: "精选", link: "https://www.douban.com/group" },
-  ngabbs: { sourceName: "ngabbs", title: "NGA", type: "热帖", link: "https://bbs.nga.cn" },
-  hellogithub: { sourceName: "hellogithub", title: "HelloGitHub", type: "开源精选", link: "https://hellogithub.com" },
-  github: { sourceName: "github", title: "GitHub", type: "Trending", link: "https://github.com/trending" },
-  v2ex: { sourceName: "v2ex", title: "V2EX", type: "最热主题", link: "https://www.v2ex.com" },
-  hackernews: { sourceName: "hackernews", title: "Hacker News", type: "Top", link: "https://news.ycombinator.com" },
-  reuters: { sourceName: "reuters", title: "路透社·要闻", type: "要闻", link: "https://www.reuters.com" },
-  "reuters:world": { sourceName: "reuters", subType: "world", title: "路透社·国际", type: "国际", link: "https://www.reuters.com/world" },
-  "reuters:business": { sourceName: "reuters", subType: "business", title: "路透社·商业", type: "商业", link: "https://www.reuters.com/business" },
-  "reuters:technology": { sourceName: "reuters", subType: "technology", title: "路透社·科技", type: "科技", link: "https://www.reuters.com/technology" },
-  "reuters:markets": { sourceName: "reuters", subType: "markets", title: "路透社·金融", type: "金融", link: "https://www.reuters.com/markets" },
-  "jin10:important": { sourceName: "jin10", subType: "important", title: "金十数据·要闻", type: "要闻", link: "https://www.jin10.com" },
-  jin10: { sourceName: "jin10", title: "金十数据", type: "快讯", link: "https://flash.jin10.com" },
-  "bloomberg:world": { sourceName: "bloomberg", subType: "world", title: "彭博社·全球", type: "全球头条", link: "https://www.bloomberg.com" },
-  "bloomberg:markets": { sourceName: "bloomberg", subType: "markets", title: "彭博社·市场", type: "金融市场", link: "https://www.bloomberg.com/markets" },
-  bloomberg: { sourceName: "bloomberg", title: "彭博社", type: "资讯", link: "https://www.bloomberg.com" },
-  sina: { sourceName: "sina", title: "新浪网", type: "热榜", link: "https://news.sina.com.cn" },
-  weibo: { sourceName: "weibo", title: "微博热搜", type: "热搜榜", link: "https://weibo.com" },
-  zhihu: { sourceName: "zhihu", title: "知乎热榜", type: "热榜", link: "https://www.zhihu.com/hot" },
+export interface SourceItemDto {
+  key: string;
+  name: string;
+  params: Record<string, any>;
+  label: string;
+  category: string;
+  type: string;
+  link: string;
+  logo: string;
+  logoText: string;
+  logoColor: string;
+  order: number;
+  defaultOn: boolean;
+  enabled: boolean;
+  stats: SourceStats;
+}
+
+interface RawSourceRow {
+  key: string;
+  name: string;
+  sub_type: string;
+  params_json: string;
+  label: string;
+  category: string;
+  type: string;
+  link: string;
+  logo_url: string;
+  logo_text: string;
+  logo_color: string;
+  has_logo: number;
+  logo_etag: string;
+  sort_order: number;
+  default_on: number;
+  enabled: number;
+  retired: number;
+  status: string;
+  last_started_at: string;
+  last_finished_at: string;
+  last_success_at: string;
+  last_error: string;
+  items_total: number;
+  items_last_run: number;
+  consecutive_failures: number;
+  updated_at: string;
+}
+
+interface SourcesCacheEntry {
+  initialized: boolean;
+  rows: RawSourceRow[];
+  etag: string;
+  generatedAt: string;
+  expiresAt: number;
+}
+
+interface LogoCacheEntry {
+  mime: string;
+  bytes: Buffer;
+  etag: string;
+}
+
+let sourcesCache: SourcesCacheEntry | null = null;
+let logosCacheMap: Map<string, LogoCacheEntry> = new Map();
+let logosCacheExpiresAt = 0;
+
+const md5 = (input: string | Buffer): string =>
+  crypto.createHash("md5").update(input).digest("hex");
+
+const isNoSuchTableError = (err: unknown): boolean => {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /no such table/i.test(msg);
 };
 
-/** 历史中文标签到信源代号的平滑映射表（用于回填历史 5179 条旧记录） */
-const LABEL_BACKFILL_MAP: Array<{ label: string; sourceName: string; subType: string }> = [
-  { label: "路透社·要闻", sourceName: "reuters", subType: "" },
-  { label: "路透社·国际", sourceName: "reuters", subType: "world" },
-  { label: "路透社·商业", sourceName: "reuters", subType: "business" },
-  { label: "路透社·金融", sourceName: "reuters", subType: "markets" },
-  { label: "路透社·科技", sourceName: "reuters", subType: "technology" },
-  { label: "彭博社·全球", sourceName: "bloomberg", subType: "world" },
-  { label: "彭博社·市场", sourceName: "bloomberg", subType: "markets" },
-  { label: "彭博社", sourceName: "bloomberg", subType: "" },
-  { label: "快手", sourceName: "kuaishou", subType: "" },
-  { label: "Hacker News", sourceName: "hackernews", subType: "" },
-  { label: "今日头条", sourceName: "toutiao", subType: "" },
-  { label: "财联社电报", sourceName: "cls", subType: "" },
-  { label: "财联社", sourceName: "cls", subType: "" },
-  { label: "腾讯新闻", sourceName: "qq-news", subType: "" },
-  { label: "抖音", sourceName: "douyin", subType: "" },
-  { label: "界面快报", sourceName: "jiemian", subType: "" },
-  { label: "界面热门", sourceName: "jiemian", subType: "hot" },
-  { label: "界面新闻", sourceName: "jiemian", subType: "" },
-  { label: "NGA", sourceName: "ngabbs", subType: "" },
-  { label: "36氪", sourceName: "36kr", subType: "" },
-  { label: "澎湃新闻", sourceName: "thepaper", subType: "" },
-  { label: "金十数据·要闻", sourceName: "jin10", subType: "important" },
-  { label: "金十数据", sourceName: "jin10", subType: "" },
-  { label: "IT之家", sourceName: "ithome", subType: "" },
-  { label: "稀土掘金", sourceName: "juejin", subType: "" },
-  { label: "哔哩哔哩", sourceName: "bilibili", subType: "" },
-  { label: "豆瓣讨论小组", sourceName: "douban-group", subType: "" },
-  { label: "豆瓣讨论", sourceName: "douban-group", subType: "" },
-  { label: "少数派", sourceName: "sspai", subType: "" },
-  { label: "V2EX", sourceName: "v2ex", subType: "" },
-  { label: "GitHub", sourceName: "github", subType: "" },
-  { label: "HelloGitHub", sourceName: "hellogithub", subType: "" },
-  { label: "新浪网", sourceName: "sina", subType: "" },
-  { label: "微博", sourceName: "weibo", subType: "" },
-  { label: "知乎", sourceName: "zhihu", subType: "" },
-];
+/**
+ * 转换任意 SQLite/libSQL BLOB 返回值为 Node Buffer
+ */
+const toBuffer = (val: unknown): Buffer => {
+  if (!val) return Buffer.alloc(0);
+  if (Buffer.isBuffer(val)) return val;
+  if (val instanceof Uint8Array) return Buffer.from(val);
+  if (val instanceof ArrayBuffer) return Buffer.from(val);
+  if (typeof val === "string") return Buffer.from(val, "base64");
+  return Buffer.from(val as any);
+};
 
 /**
- * 启动时回填旧数据信源字段
+ * 启动时检查 schema_meta 版本握手与预热图标缓存（不阻塞启动，不写爬虫表）
  */
-export const backfillOldNewsSources = async (): Promise<void> => {
+export const initNewsDb = async (): Promise<void> => {
   try {
-    for (const item of LABEL_BACKFILL_MAP) {
-      await executeSql(
-        `UPDATE news_items
-         SET source_name = ?, sub_type = ?
-         WHERE source = ? AND (source_name = '' OR source_name IS NULL)`,
-        [item.sourceName, item.subType, item.label],
+    const row = await queryOne(
+      `SELECT value FROM schema_meta WHERE key = 'news_schema_version'`,
+    );
+    const actual = row ? parseInt(String(row.value), 10) : 0;
+    if (actual !== EXPECTED_NEWS_SCHEMA) {
+      logger.warn(
+        `⚠️ [NewsDb] schema_meta.news_schema_version 期望 ${EXPECTED_NEWS_SCHEMA}，实际 ${actual || "未设置"}`,
+      );
+    } else {
+      logger.info(`✨ [NewsDb] schema_meta 版本校验通过 (v${actual})`);
+    }
+  } catch (err) {
+    if (isNoSuchTableError(err)) {
+      logger.warn(`⚠️ [NewsDb] schema_meta 表尚未创建（等待爬虫初始化）`);
+    } else {
+      logger.warn(
+        `⚠️ [NewsDb] 读取 schema_meta 异常: ${err instanceof Error ? err.message : err}`,
       );
     }
-    logger.info(`✨ [NewsDb] 历史新闻信源映射回填检查完毕`);
-  } catch (err) {
-    logger.error(
-      `⚠️ [NewsDb] 回填历史信源异常: ${err instanceof Error ? err.message : err}`,
-    );
   }
+
+  // 预热清单与图标内存缓存
+  await loadSourcesWithCache(true);
+  await loadLogosWithCache(true);
+};
+
+/**
+ * 兼容旧入口调用（严守契约：backend 不再对 news_items 执行 UPDATE）
+ */
+export const backfillOldNewsSources = async (): Promise<void> => {
+  await initNewsDb();
+};
+
+/**
+ * 读取并缓存 sources 表（60s TTL）
+ */
+const loadSourcesWithCache = async (
+  force = false,
+): Promise<SourcesCacheEntry> => {
+  const now = Date.now();
+  if (!force && sourcesCache && sourcesCache.expiresAt > now) {
+    return sourcesCache;
+  }
+
+  try {
+    const rows = (await queryRows(
+      `SELECT
+         key, name, sub_type, params_json, label, category, type, link,
+         logo_url, logo_text, logo_color, has_logo, logo_etag,
+         sort_order, default_on, enabled, retired,
+         status, last_started_at, last_finished_at, last_success_at, last_error,
+         items_total, items_last_run, consecutive_failures, updated_at
+       FROM sources
+       WHERE retired = 0
+       ORDER BY sort_order ASC, key ASC`,
+    )) as RawSourceRow[];
+
+    if (!rows || rows.length === 0) {
+      const emptyEntry: SourcesCacheEntry = {
+        initialized: false,
+        rows: [],
+        etag: "src-empty",
+        generatedAt: new Date(now).toISOString(),
+        expiresAt: now + 5_000, // 空表时短缓存，以便爬虫刚写入后快速感知
+      };
+      sourcesCache = emptyEntry;
+      return emptyEntry;
+    }
+
+    let maxUpdatedAt = "";
+    for (const r of rows) {
+      if (r.updated_at && r.updated_at > maxUpdatedAt) {
+        maxUpdatedAt = r.updated_at;
+      }
+    }
+    const etag = `src-${md5(`${maxUpdatedAt}:${rows.length}`).slice(0, 12)}`;
+
+    const entry: SourcesCacheEntry = {
+      initialized: true,
+      rows,
+      etag,
+      generatedAt: new Date(now).toISOString(),
+      expiresAt: now + CACHE_TTL_MS,
+    };
+    sourcesCache = entry;
+    return entry;
+  } catch (err) {
+    if (isNoSuchTableError(err)) {
+      const uninitEntry: SourcesCacheEntry = {
+        initialized: false,
+        rows: [],
+        etag: "src-uninit",
+        generatedAt: new Date(now).toISOString(),
+        expiresAt: now + 5_000,
+      };
+      sourcesCache = uninitEntry;
+      return uninitEntry;
+    }
+    throw err;
+  }
+};
+
+/**
+ * 读取并缓存 source_logos 全表到内存 Map（60s TTL）
+ */
+const loadLogosWithCache = async (
+  force = false,
+): Promise<Map<string, LogoCacheEntry>> => {
+  const now = Date.now();
+  if (!force && logosCacheExpiresAt > now && logosCacheMap.size > 0) {
+    return logosCacheMap;
+  }
+
+  try {
+    const rows = await queryRows(
+      `SELECT l.key, l.mime, l.bytes, s.logo_etag
+       FROM source_logos l
+       LEFT JOIN sources s ON s.key = l.key`,
+    );
+
+    const nextMap = new Map<string, LogoCacheEntry>();
+    for (const r of rows) {
+      const buf = toBuffer(r.bytes);
+      if (buf.length > 0) {
+        const etag = r.logo_etag || md5(buf).slice(0, 16);
+        nextMap.set(String(r.key), {
+          mime: String(r.mime || "image/png"),
+          bytes: buf,
+          etag: String(etag),
+        });
+      }
+    }
+    logosCacheMap = nextMap;
+    logosCacheExpiresAt = now + CACHE_TTL_MS;
+    return logosCacheMap;
+  } catch (err) {
+    if (isNoSuchTableError(err)) {
+      logosCacheMap = new Map();
+      logosCacheExpiresAt = now + 5_000;
+      return logosCacheMap;
+    }
+    logger.warn(
+      `⚠️ [NewsDb] 加载 source_logos 缓存失败: ${err instanceof Error ? err.message : err}`,
+    );
+    return logosCacheMap;
+  }
+};
+
+/**
+ * 计算单行信源的运行时状态与 DTO
+ */
+const toSourceItemDto = (row: RawSourceRow, nowMs: number): SourceItemDto => {
+  const crawlIntervalMs = (config.CRAWL_INTERVAL_MINUTES || 120) * 60_000;
+  const staleThresholdMs = 2 * crawlIntervalMs;
+  const stuckThresholdMs = 30 * 60_000;
+
+  let params: Record<string, any> = {};
+  if (row.params_json) {
+    try {
+      const parsed = JSON.parse(row.params_json);
+      if (parsed && typeof parsed === "object") {
+        params = parsed;
+      }
+    } catch {
+      params = {};
+    }
+  }
+
+  const lastSuccessMs = row.last_success_at ? Date.parse(row.last_success_at) : 0;
+  const stale =
+    !lastSuccessMs ||
+    Number.isNaN(lastSuccessMs) ||
+    nowMs - lastSuccessMs > staleThresholdMs;
+
+  let status = row.status || "idle";
+  if (status === "running") {
+    const startedMs = row.last_started_at ? Date.parse(row.last_started_at) : 0;
+    if (!startedMs || Number.isNaN(startedMs) || nowMs - startedMs > stuckThresholdMs) {
+      status = "stuck";
+    }
+  }
+
+  const consecutiveFailures = Number(row.consecutive_failures ?? 0);
+  const enabled =
+    Number(row.enabled) === 1 &&
+    Number(row.retired) === 0 &&
+    consecutiveFailures < 5;
+
+  const logo =
+    row.logo_url && row.logo_url.trim()
+      ? row.logo_url.trim()
+      : `/logo/${row.key}.png`;
+
+  return {
+    key: String(row.key),
+    name: String(row.name),
+    params,
+    label: String(row.label),
+    category: String(row.category || ""),
+    type: String(row.type || ""),
+    link: String(row.link || ""),
+    logo,
+    logoText: String(row.logo_text || row.label?.slice(0, 1) || ""),
+    logoColor: String(row.logo_color || "#5F5E5A"),
+    order: Number(row.sort_order ?? 0),
+    defaultOn: Number(row.default_on ?? 1) === 1,
+    enabled,
+    stats: {
+      total: Number(row.items_total ?? 0),
+      lastSuccessAt: String(row.last_success_at || ""),
+      stale,
+      status,
+      consecutiveFailures,
+    },
+  };
+};
+
+/**
+ * GET /sources 数据供给
+ */
+export const getSourcesManifest = async (): Promise<{
+  initialized: boolean;
+  etag: string;
+  generatedAt: string;
+  sources: SourceItemDto[];
+}> => {
+  const entry = await loadSourcesWithCache();
+  if (!entry.initialized) {
+    return {
+      initialized: false,
+      etag: entry.etag,
+      generatedAt: entry.generatedAt,
+      sources: [],
+    };
+  }
+
+  const nowMs = Date.now();
+  const sources = entry.rows.map((r) => toSourceItemDto(r, nowMs));
+
+  return {
+    initialized: true,
+    etag: entry.etag,
+    generatedAt: entry.generatedAt,
+    sources,
+  };
+};
+
+const escapeXml = (s: string): string =>
+  s.replace(
+    /[&<>"']/g,
+    (c) =>
+      ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      })[c]!,
+  );
+
+export type LogoResolution =
+  | { type: "not_found" }
+  | { type: "redirect"; url: string; etag: string }
+  | { type: "blob"; mime: string; bytes: Buffer; etag: string }
+  | { type: "badge"; mime: string; svg: string; etag: string };
+
+/**
+ * GET /logo/:file 三级降级解析
+ */
+export const resolveSourceLogo = async (key: string): Promise<LogoResolution> => {
+  const entry = await loadSourcesWithCache();
+  const sourceRow = entry.rows.find(
+    (r) => r.key === key && Number(r.retired) === 0,
+  );
+
+  // 守门：key 不在 sources（或 retired = 1）-> 404
+  if (!sourceRow) {
+    return { type: "not_found" };
+  }
+
+  // 1. logo_url 非空 -> 302 跳转
+  if (sourceRow.logo_url && sourceRow.logo_url.trim()) {
+    const url = sourceRow.logo_url.trim();
+    return {
+      type: "redirect",
+      url,
+      etag: md5(url).slice(0, 16),
+    };
+  }
+
+  // 2. source_logos 命中 -> 200 + bytes
+  const logosMap = await loadLogosWithCache();
+  const blobEntry = logosMap.get(key);
+  if (blobEntry && blobEntry.bytes.length > 0) {
+    return {
+      type: "blob",
+      mime: blobEntry.mime,
+      bytes: blobEntry.bytes,
+      etag: blobEntry.etag,
+    };
+  }
+
+  // 3. 否则 -> 200 + 动态 SVG 文字徽标
+  const text = (sourceRow.logo_text || sourceRow.label || key).slice(0, 2);
+  const color = sourceRow.logo_color || "#5F5E5A";
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="14" fill="${escapeXml(color)}"/>
+  <text x="32" y="34" dominant-baseline="central" text-anchor="middle" font-family="sans-serif" font-size="28" font-weight="bold" fill="#fff">${escapeXml(text)}</text>
+</svg>`;
+  const etag = `badge-${md5(`${text}:${color}`).slice(0, 16)}`;
+
+  return {
+    type: "badge",
+    mime: "image/svg+xml",
+    svg,
+    etag,
+  };
+};
+
+/**
+ * GET /health 状态聚合
+ */
+export const getHealthStatus = async () => {
+  const startMs = Date.now();
+  let dbOk = false;
+  let actualSchema = 0;
+
+  try {
+    await queryOne(`SELECT 1 AS ok`);
+    dbOk = true;
+  } catch {
+    dbOk = false;
+  }
+  const latencyMs = Date.now() - startMs;
+
+  if (!dbOk) {
+    return {
+      code: 200,
+      status: "down" as const,
+      db: { ok: false, latencyMs },
+      sources: { total: 0, stale: 0, failed: 0 },
+      crawler: { lastStartedAt: "", lagMinutes: -1 },
+      schema: { expected: EXPECTED_NEWS_SCHEMA, actual: 0 },
+    };
+  }
+
+  try {
+    const schemaRow = await queryOne(
+      `SELECT value FROM schema_meta WHERE key = 'news_schema_version'`,
+    );
+    if (schemaRow && schemaRow.value !== undefined) {
+      actualSchema = parseInt(String(schemaRow.value), 10) || 0;
+    }
+  } catch {
+    actualSchema = 0;
+  }
+
+  const manifest = await getSourcesManifest();
+  const total = manifest.sources.length;
+  let staleCount = 0;
+  let failedCount = 0;
+  let latestStartedAt = "";
+
+  for (const r of sourcesCache?.rows || []) {
+    if (r.last_started_at && r.last_started_at > latestStartedAt) {
+      latestStartedAt = r.last_started_at;
+    }
+    if (r.last_success_at && r.last_success_at > latestStartedAt) {
+      latestStartedAt = r.last_success_at;
+    }
+  }
+
+  for (const s of manifest.sources) {
+    if (s.stats.stale) staleCount++;
+    if (s.stats.status === "failed" || s.stats.status === "stuck") {
+      failedCount++;
+    }
+  }
+
+  const nowMs = Date.now();
+  const lastStartedMs = latestStartedAt ? Date.parse(latestStartedAt) : 0;
+  const lagMinutes =
+    lastStartedMs && !Number.isNaN(lastStartedMs)
+      ? Math.max(0, Math.round((nowMs - lastStartedMs) / 60_000))
+      : 999999;
+
+  const crawlInterval = config.CRAWL_INTERVAL_MINUTES || 120;
+  let status: "ok" | "degraded" | "down" = "ok";
+
+  if (!manifest.initialized || lagMinutes > 6 * crawlInterval) {
+    status = "down";
+  } else if (
+    lagMinutes > 2 * crawlInterval ||
+    actualSchema !== EXPECTED_NEWS_SCHEMA
+  ) {
+    status = "degraded";
+  }
+
+  return {
+    code: 200,
+    status,
+    db: { ok: true, latencyMs },
+    sources: { total, stale: staleCount, failed: failedCount },
+    crawler: { lastStartedAt: latestStartedAt, lagMinutes },
+    schema: { expected: EXPECTED_NEWS_SCHEMA, actual: actualSchema },
+  };
 };
 
 export interface NewsQueryOptions {
@@ -123,18 +529,27 @@ export interface NewsItemResult {
 }
 
 export interface NewsListResult {
+  key: string;
   name: string;
   title: string;
   type: string;
   description?: string;
   link?: string;
   total: number;
+  stale: boolean;
   updateTime: string;
   data: NewsItemResult[];
 }
 
+export class UnknownSourceError extends Error {
+  constructor(sourceName: string, subType = "") {
+    super(`unknown source: ${sourceName}${subType ? ` (${subType})` : ""}`);
+    this.name = "UnknownSourceError";
+  }
+}
+
 /**
- * 按信源代号和子分类查询新闻列表（直接从 news_items 表读取）
+ * 按信源代号和子分类查询新闻列表（先在 sources 表核验，未知信源抛 UnknownSourceError -> 404）
  */
 export const queryNewsBySource = async (
   sourceName: string,
@@ -143,27 +558,40 @@ export const queryNewsBySource = async (
   const subType = options.subType || "";
   const limit = Math.min(Math.max(1, options.limit || 30), 100);
 
-  const metaKey = subType ? `${sourceName}:${subType}` : sourceName;
-  const meta: SourceMeta = SOURCE_METADATA_MAP[metaKey] ||
-    SOURCE_METADATA_MAP[sourceName] || {
-      sourceName,
-      subType,
-      title: sourceName,
-      type: "热榜",
-    };
+  const entry = await loadSourcesWithCache();
+  // 在 sources 清单中查找匹配的活跃信源
+  let matchedRow = entry.rows.find(
+    (r) =>
+      r.name === sourceName &&
+      (r.sub_type || "") === subType &&
+      Number(r.retired) === 0,
+  );
 
-  // 优先按 source_name + sub_type 查询；若为默认分类，兼容匹配 sub_type 为空或不传
+  // 如果未传 subType，且该 name 在库中只有一个默认子类型（比如部分只注册了单一子类型的源），允许按 key 或唯一 name 匹配
+  if (!matchedRow && !subType) {
+    matchedRow = entry.rows.find(
+      (r) => r.key === sourceName && Number(r.retired) === 0,
+    );
+  }
+
+  if (!matchedRow) {
+    throw new UnknownSourceError(sourceName, subType);
+  }
+
+  const dto = toSourceItemDto(matchedRow, Date.now());
+  const effectiveName = matchedRow.name;
+  const effectiveSubType = matchedRow.sub_type || "";
+
   let sql = `
     SELECT id, news_hash, source, source_name, sub_type, title, desc_text, url, mobile_url, hot, cover, pub_time, created_at
     FROM news_items
     WHERE (source_name = ? AND sub_type = ?)
   `;
-  const args: any[] = [sourceName, subType];
+  const args: any[] = [effectiveName, effectiveSubType];
 
-  // 如果 subType 为空，补充兼容旧 source 标签查询
-  if (!subType && meta.title) {
+  if (!effectiveSubType && matchedRow.label) {
     sql += ` OR (source = ? AND (source_name = '' OR source_name IS NULL))`;
-    args.push(meta.title);
+    args.push(matchedRow.label);
   }
 
   sql += ` ORDER BY id DESC LIMIT ?`;
@@ -174,7 +602,7 @@ export const queryNewsBySource = async (
   const updateTime =
     rows.length > 0 && rows[0].created_at
       ? rows[0].created_at
-      : new Date().toISOString();
+      : matchedRow.last_success_at || new Date().toISOString();
 
   const data: NewsItemResult[] = rows.map((r) => ({
     id: r.id,
@@ -188,12 +616,14 @@ export const queryNewsBySource = async (
   }));
 
   return {
-    name: sourceName,
-    title: meta.title,
-    type: meta.type,
-    description: meta.description || "",
-    link: meta.link || "",
+    key: dto.key,
+    name: effectiveName,
+    title: dto.label,
+    type: dto.type,
+    description: "",
+    link: dto.link,
     total: data.length,
+    stale: dto.stats.stale,
     updateTime,
     data,
   };

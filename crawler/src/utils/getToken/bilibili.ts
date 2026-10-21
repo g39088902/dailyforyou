@@ -1,5 +1,4 @@
 // 获取 Bilibili Web 端 WBI 签名鉴权
-import { getCache, setCache } from "../cache.js";
 import { get } from "../getData.js";
 import md5 from "md5";
 
@@ -67,17 +66,11 @@ const getWbiKeys = async (): Promise<EncodedKeys> => {
 };
 
 const getBiliWbi = async (): Promise<string> => {
-  const cachedData = await getCache("bilibili-wbi");
-  if (cachedData?.data) return cachedData.data as string;
   const web_keys = await getWbiKeys();
   const params = { foo: "114", bar: "514", baz: 1919810 };
   const img_key = web_keys.img_key;
   const sub_key = web_keys.sub_key;
   const query = encWbi(params, img_key, sub_key);
-  await setCache("bilibili-wbi", {
-    data: query,
-    updateTime: new Date().toISOString(),
-  });
   return query;
 };
 

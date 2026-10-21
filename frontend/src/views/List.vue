@@ -1,18 +1,18 @@
 <template>
   <div class="list">
-    <n-space class="type" v-if="store.newsArr[0]">
+    <n-space class="type" v-if="visibleSources.length > 0">
       <n-tag
         round
         size="large"
         class="tag"
-        v-for="item in store.newsArr.filter((item) => item.show)"
-        :key="item.name"
-        :type="item.name === listType ? 'primary' : 'default'"
-        @click="changeType(item.name)"
+        v-for="item in visibleSources"
+        :key="item.key"
+        :type="item.key === currentSourceKey ? 'primary' : 'default'"
+        @click="changeType(item.key)"
       >
         {{ item.label }}
         <template #avatar>
-          <img :src="`/logo/${item.name}.png`" alt="logo" class="logo" />
+          <img :src="resolveLogoUrl(item.logo)" :alt="item.label" class="logo" />
         </template>
       </n-tag>
     </n-space>
@@ -27,17 +27,17 @@
           <template v-else>
             <div class="header">
               <div class="logo">
-                <img :src="`/logo/${listType}.png`" alt="logo" />
+                <img :src="resolveLogoUrl(currentSource?.logo)" :alt="currentSource?.label" />
               </div>
               <div class="name">
                 <n-text class="title">{{ listData.title }}</n-text>
                 <n-text class="subtitle" :depth="3">
-                  {{ listData.subtitle }}
+                  {{ listData.type || currentSource?.type || "" }}
                 </n-text>
               </div>
               <div class="data">
                 <n-text
-                  v-if="listData.total"
+                  v-if="listData.total !== undefined"
                   :depth="3"
                   class="total"
                   v-html="listData.total"
@@ -68,7 +68,7 @@
                   pageNumber * 20 - 20,
                   pageNumber * 20
                 )"
-                :key="item"
+                :key="item.id || index"
                 @click="jumpLink(item)"
               >
                 <template #prefix>
@@ -120,50 +120,70 @@
 </template>
 
 <script setup>
+import { computed, onMounted, ref, watch } from "vue";
 import { Fire } from "@icon-park/vue-next";
 import { mainStore } from "@/store";
 import { useRouter } from "vue-router";
 import { formatTime } from "@/utils/getTime";
-import { getHotLists } from "@/api";
+import { getHotLists, resolveLogoUrl } from "@/api";
 
 const router = useRouter();
 const store = mainStore();
 
-const updateTime = ref(null);
-const listType = ref(
-  store.newsArr.find((item) => item.name === router.currentRoute.value.query.type)
-    ?.name ||
-    store.newsArr[0]?.name ||
-    store.defaultNewsArr[0]?.name
+const visibleSources = computed(() => {
+  return store.sources.filter((item) => Boolean(item.show));
+});
+
+const currentSourceKey = ref(
+  router.currentRoute.value.query.type ||
+    visibleSources.value[0]?.key ||
+    store.sources[0]?.key ||
+    ""
 );
+
+const currentSource = computed(() => {
+  return store.sources.find((s) => s.key === currentSourceKey.value) || null;
+});
+
 const pageNumber = ref(
   router.currentRoute.value.query.page
     ? Number(router.currentRoute.value.query.page)
     : 1
 );
 const listData = ref(null);
+const updateTime = ref(null);
 
-// 获取热榜数据
-const getHotListsData = async (name, isNew = false) => {
+const getHotListsData = async (sourceKey, isNew = false) => {
   listData.value = null;
-  const item = store.newsArr.find((item) => item.name == name);
+  const item = store.sources.find((s) => s.key === sourceKey);
   if (!item) {
-    $message.error("该分类不存在或已被移除");
+    if (store.sources.length > 0) {
+      window.$message?.error("该分类不存在或已被移除");
+    }
     return;
   }
-  getHotLists(item.name, isNew, item.params).then((res) => {
-    console.log(res);
-    if (res.code === 200) {
+  try {
+    const res = await getHotLists(item, isNew);
+    if (res && res.code === 200) {
       listData.value = res;
+      updateTime.value = formatTime(res.updateTime);
+    } else if (res && res.code === 404) {
+      store.removeOfflineSource(item.key);
     } else {
-      $message.error(res.message);
+      window.$message?.error(res?.message || "读取信源失败");
     }
-  });
+  } catch (err) {
+    const status = err?.response?.status;
+    if (status === 404) {
+      store.removeOfflineSource(item.key);
+    } else {
+      window.$message?.error("读取信源失败，请稍后重试");
+    }
+  }
 };
 
-// 链接跳转
 const jumpLink = (data) => {
-  if (!data.url || !data.mobileUrl) return $message.error("链接不存在");
+  if (!data.url && !data.mobileUrl) return window.$message?.error("链接不存在");
   const url = window.innerWidth > 680 ? data.url : data.mobileUrl;
   if (store.linkOpenType === "open") {
     window.open(url, "_blank");
@@ -172,18 +192,17 @@ const jumpLink = (data) => {
   }
 };
 
-// 切换类别
-const changeType = (type) => {
+const changeType = (key) => {
+  currentSourceKey.value = key;
   router.push({
     path: "/list",
     query: {
-      type,
+      type: key,
       page: 1,
     },
   });
 };
 
-// 实时改变更新时间
 watch(
   () => store.timeData,
   () => {
@@ -193,14 +212,13 @@ watch(
   }
 );
 
-// 页数变化
 watch(
   () => pageNumber.value,
   (val) => {
     router.push({
       path: "/list",
       query: {
-        type: listType.value,
+        type: currentSourceKey.value,
         page: val,
       },
     });
@@ -208,20 +226,27 @@ watch(
   }
 );
 
-// 类别变化
 watch(
   () => router.currentRoute.value,
   (val) => {
     if (val.name === "list") {
-      listType.value = val.query.type;
-      pageNumber.value = Number(val.query.page);
-      getHotListsData(listType.value);
+      currentSourceKey.value = val.query.type;
+      pageNumber.value = Number(val.query.page || 1);
+      getHotListsData(currentSourceKey.value);
     }
   }
 );
 
-onMounted(() => {
-  getHotListsData(listType.value);
+onMounted(async () => {
+  if (store.sources.length === 0) {
+    await store.loadSources();
+  }
+  if (!currentSourceKey.value) {
+    currentSourceKey.value = visibleSources.value[0]?.key || store.sources[0]?.key || "";
+  }
+  if (currentSourceKey.value) {
+    getHotListsData(currentSourceKey.value);
+  }
 });
 </script>
 
@@ -235,6 +260,7 @@ onMounted(() => {
         height: 22px;
         width: 22px;
         margin-left: 6px;
+        border-radius: 50%;
       }
     }
   }
@@ -269,8 +295,10 @@ onMounted(() => {
         display: flex;
         align-items: center;
         img {
-          height: 50px;
-          width: 50px;
+          height: 48px;
+          width: 48px;
+          border-radius: 10px;
+          object-fit: cover;
         }
       }
       .name {

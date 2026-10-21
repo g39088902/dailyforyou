@@ -63,8 +63,7 @@ curl -s -o /dev/null -w "%{http_code}\n" http://134.175.155.179:8081/api/score  
 curl -s -o /dev/null -w "%{http_code}\n" http://134.175.155.179:8081/feed/cls?limit=3      # 200 + 入库 news_items
 ```
 
-- 服务器上跑 `cd /opt/dailyhot/back && E2E_BASE=http://127.0.0.1:8081/api node scripts/login-e2e.mjs`
-  → **19/19 通过**（登录、nonce 重放拒绝、评分、缓存命中、手改/重置、已读、Prompt 失效、跨用户隔离、迁移不变量）。
+- 端到端验证（临时钱包）：曾 **19/19 通过**（登录、nonce 重放拒绝、评分、缓存命中、手改/重置、已读、Prompt 失效、跨用户隔离、迁移不变量）；校验脚本已移除。
 - 浏览器实拍：首页框架、登录弹窗（MetaMask 可用，微信/手机号灰态）均正常。
 
 ---
@@ -220,4 +219,3 @@ for (const t of ['users','auth_identities','user_news_states']) console.log(t,(a
 | 前端生产变量 | `frontend/.env.production` |
 | Nginx 站点配置 | 服务器 `/etc/nginx/conf.d/dailyforyou.conf` |
 | 后端生产环境 | 服务器 `/opt/dailyhot/back/.env` |
-| 端到端脚本 | `backend/scripts/login-e2e.mjs` |
