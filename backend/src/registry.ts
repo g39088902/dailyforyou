@@ -288,10 +288,45 @@ const handleManualScoreUpdate = async (c: any) => {
   }
 };
 
-// 注册用户手动修正评分接口（支持 POST / PUT / PATCH 多种调用方式）
+// 注册用户手动修正评分接口（支持 POST / PUT / PATCH / DELETE 多种调用方式）
 app.post("/score/manual", handleManualScoreUpdate);
 app.put("/score/manual", handleManualScoreUpdate);
 app.patch("/score/manual", handleManualScoreUpdate);
+app.delete("/score/manual", async (c) => {
+  try {
+    const { userId } = getAuthUser(c);
+    const idParam = c.req.query("id");
+    const hashParam = c.req.query("newsHash") || c.req.query("hash");
+    let recordId = idParam && /^\d+$/.test(idParam) ? parseInt(idParam, 10) : undefined;
+    let newsHash = hashParam ? hashParam.trim() : undefined;
+
+    if (!recordId && !newsHash) {
+      const body = await c.req.json().catch(() => ({}));
+      if (body.id) recordId = typeof body.id === "number" ? body.id : parseInt(body.id, 10);
+      if (body.newsHash) newsHash = String(body.newsHash).trim();
+    }
+
+    if (!recordId && !newsHash) {
+      return c.json({ code: 400, message: "请提供待重置记录的 id 或 newsHash" }, 400);
+    }
+
+    const result = await updateManualScoreItem(userId, {
+      id: recordId,
+      newsHash,
+      reset: true,
+    });
+
+    return c.json({
+      code: 200,
+      message: "已重置为 AI 原始评分",
+      data: result,
+    });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : "Unknown error";
+    logger.error(`❌ [DELETE /score/manual] ${msg}`);
+    return c.json({ code: 500, message: `重置失败: ${msg}` }, 500);
+  }
+});
 app.post("/score/feedback", handleManualScoreUpdate);
 app.put("/score", handleManualScoreUpdate);
 app.patch("/score", handleManualScoreUpdate);
@@ -433,13 +468,28 @@ const handleQueryScoreRecords = (defaultOnlyModified: boolean) => async (c: any)
         : undefined;
 
     const source = c.req.query("source") || undefined;
-    const limit = c.req.query("limit") ? parseInt(c.req.query("limit"), 10) : 100;
-    const offset = c.req.query("offset") ? parseInt(c.req.query("offset"), 10) : 0;
+    const keyword = c.req.query("keyword") || c.req.query("q") || undefined;
+
+    const pageParam = c.req.query("page");
+    const pageSizeParam = c.req.query("pageSize");
+    const page = pageParam ? Math.max(1, parseInt(pageParam, 10)) : undefined;
+    const pageSize = pageSizeParam
+      ? Math.max(1, Math.min(parseInt(pageSizeParam, 10), 200))
+      : undefined;
+
+    const limit =
+      pageSize ??
+      (c.req.query("limit") ? Math.max(1, Math.min(parseInt(c.req.query("limit")!, 10), 500)) : 20);
+    const offset =
+      page && pageSize
+        ? (page - 1) * pageSize
+        : (c.req.query("offset") ? Math.max(0, parseInt(c.req.query("offset")!, 10)) : 0);
 
     const { total, items } = await queryScoreRecords(userId, {
       onlyUserModified,
       onlyRead,
       source,
+      keyword,
       limit,
       offset,
     });
@@ -452,9 +502,13 @@ const handleQueryScoreRecords = (defaultOnlyModified: boolean) => async (c: any)
       aiModel: row.ai_model,
     }));
 
+    const currentPage = page || (limit > 0 ? Math.floor(offset / limit) + 1 : 1);
+
     return c.json({
       code: 200,
       total,
+      page: currentPage,
+      pageSize: limit,
       count: formattedItems.length,
       onlyUserModified,
       data: formattedItems,

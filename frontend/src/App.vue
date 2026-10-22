@@ -16,7 +16,7 @@
           </keep-alive>
         </router-view>
       </main>
-      <Footer />
+      <Footer v-if="!isAccountPage" />
     </n-layout>
     <LoginModal />
   </Provider>
@@ -39,6 +39,7 @@ const authStore = useAuthStore();
 store.loadSources();
 
 const isStreamPage = computed(() => route.path === "/stream" || route.path === "/");
+const isAccountPage = computed(() => route.path.startsWith("/account"));
 
 onMounted(() => {
   // 未登录状态打开网页时，默认弹窗引导用户登录（可关闭）

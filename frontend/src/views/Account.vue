@@ -104,6 +104,11 @@
           </n-alert>
         </n-space>
       </n-card>
+
+      <n-h6 prefix="bar">手动调整过的新闻记录</n-h6>
+      <n-card class="set-item">
+        <UserScoreRecords />
+      </n-card>
     </template>
   </div>
 </template>
@@ -113,6 +118,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
 import { useAuthStore } from "@/store/auth";
 import { AUTH_EVENTS, emitAuthEvent } from "@/utils/authEvents";
+import UserScoreRecords from "@/components/Account/UserScoreRecords.vue";
 import {
   getAccountProfile,
   getAccountPrompt,

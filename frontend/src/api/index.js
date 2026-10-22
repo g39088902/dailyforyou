@@ -126,7 +126,7 @@ export const updateManualScore = (payload) => {
 
 /**
  * 查询 SQLite 中存储的新闻评分记录（支持仅筛选用户手动修正过的记录）
- * @param {object} params { modified: true, source, limit, offset }
+ * @param {object} params { modified: true, source, limit, offset, page, pageSize, keyword }
  * @returns
  */
 export const getScoreRecords = (params = {}) => {
@@ -134,6 +134,33 @@ export const getScoreRecords = (params = {}) => {
     method: "GET",
     url: "/score/records",
     params,
+  });
+};
+
+/**
+ * 快捷查询当前用户手动修正过的新闻记录
+ * @param {object} params { page, pageSize, keyword, source }
+ */
+export const getUserModifiedRecords = (params = {}) => {
+  return axios({
+    method: "GET",
+    url: "/score/manual",
+    params: {
+      ...params,
+      modified: true,
+    },
+  });
+};
+
+/**
+ * 重置/撤销单条用户手动修正（恢复为 AI 原始打分）
+ * @param {{ id?: number, newsHash?: string }} payload
+ */
+export const resetManualScore = (payload) => {
+  return axios({
+    method: "DELETE",
+    url: "/score/manual",
+    params: payload,
   });
 };
 

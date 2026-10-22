@@ -71,6 +71,7 @@ export interface QueryScoreRecordsParams {
   onlyUserModified?: boolean;
   onlyRead?: boolean;
   source?: string;
+  keyword?: string;
   limit?: number;
   offset?: number;
 }
@@ -580,6 +581,11 @@ export const queryScoreRecords = async (
   if (params.source && params.source.trim()) {
     conditions.push("source = ?");
     bindValues.push(params.source.trim());
+  }
+  if (params.keyword && params.keyword.trim()) {
+    conditions.push("(title LIKE ? OR user_reason LIKE ? OR ai_reason LIKE ?)");
+    const kw = `%${params.keyword.trim()}%`;
+    bindValues.push(kw, kw, kw);
   }
 
   const whereClause = `WHERE ${conditions.join(" AND ")}`;
