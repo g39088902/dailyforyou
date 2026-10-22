@@ -220,7 +220,7 @@ accountRouter.post("/prompt/test", requireAuth, async (c) => {
         latencyMs: completion.latencyMs,
         model: completion.model,
         promptHash,
-        hint: "模型输出无法解析为 {score, layer, reason}，请检查 Prompt 的输出格式段落",
+        hint: "模型输出无法解析为 {score, reason}，请检查 Prompt 的输出格式段落",
       });
     }
 

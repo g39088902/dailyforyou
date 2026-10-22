@@ -137,9 +137,9 @@ pnpm crawl:daemon         # 启动常驻定时轮询调度
 | 类别 | # | 信源 |
 | :--- | :---: | :--- |
 | 财经与宏观 | 11 | 金十数据、财联社、界面新闻、彭博社、路透社、36氪、新浪财经、新浪新闻、腾讯新闻、澎湃新闻、纽约时报 |
-| 科技与开发 | 15 | Hacker News、GitHub Trending、Product Hunt、V2EX、稀土掘金、CSDN、51CTO、少数派、爱范儿、极客公园、IT之家、IT之家喜加一、HelloGitHub、Linux.do、NodeSeek |
+| 科技与开发 | 14 | Hacker News、GitHub Trending、Product Hunt、V2EX、稀土掘金、51CTO、少数派、爱范儿、极客公园、IT之家、IT之家喜加一、HelloGitHub、Linux.do、NodeSeek |
 | 社区与生活 | 12 | 豆瓣小组、虎扑、水木社区、吾爱破解、酷安、数字尾巴、什么值得买、果壳、Hostloc、历史上的今天、地震速报、天气预警 |
-| 视频与热榜 | 5 | 哔哩哔哩、抖音、快手、今日头条、虎嗅 |
+| 视频与热榜 | 4 | 哔哩哔哩、抖音、快手、虎嗅 |
 
 跨源重复的标题会自动合并，不会在流里出现两次。
 

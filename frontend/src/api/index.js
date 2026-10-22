@@ -113,7 +113,7 @@ export const queryCachedScoresBatch = (items = []) => {
 
 /**
  * 提交用户手动修正的新闻评分（存入 SQLite 供将来 AI 自动调整推荐逻辑使用）
- * @param {object|Array} payload 单条修正 { id, newsHash, title, desc, source, userScore, userLayer, userReason, reset } 或批量数组 { items: [...] }
+ * @param {object|Array} payload 单条修正 { id, newsHash, title, desc, source, userScore, userReason, reset } 或批量数组 { items: [...] }
  * @returns
  */
 export const updateManualScore = (payload) => {

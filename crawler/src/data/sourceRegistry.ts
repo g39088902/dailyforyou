@@ -122,17 +122,6 @@ export const SOURCE_REGISTRY: SourceSeed[] = [
     defaultOn: true,
   },
   {
-    key: "toutiao",
-    name: "toutiao",
-    adapter: "toutiao",
-    label: "今日头条",
-    category: "热点",
-    type: "热榜",
-    link: "https://www.toutiao.com",
-    order: 7,
-    defaultOn: true,
-  },
-  {
     key: "juejin",
     name: "juejin",
     adapter: "juejin",
@@ -140,7 +129,7 @@ export const SOURCE_REGISTRY: SourceSeed[] = [
     category: "开发",
     type: "综合榜",
     link: "https://juejin.cn",
-    order: 8,
+    order: 7,
     defaultOn: true,
   },
   {
@@ -151,7 +140,7 @@ export const SOURCE_REGISTRY: SourceSeed[] = [
     category: "资讯",
     type: "热点精选",
     link: "https://news.qq.com",
-    order: 9,
+    order: 8,
     defaultOn: true,
   },
   {
@@ -162,7 +151,7 @@ export const SOURCE_REGISTRY: SourceSeed[] = [
     category: "财经",
     type: "电报",
     link: "https://www.cls.cn/telegraph",
-    order: 10,
+    order: 9,
     defaultOn: true,
   },
   {
@@ -173,7 +162,7 @@ export const SOURCE_REGISTRY: SourceSeed[] = [
     category: "财经",
     type: "快报",
     link: "https://www.jiemian.com",
-    order: 11,
+    order: 10,
     defaultOn: true,
   },
   {
@@ -186,7 +175,7 @@ export const SOURCE_REGISTRY: SourceSeed[] = [
     category: "财经",
     type: "热门",
     link: "https://www.jiemian.com",
-    order: 12,
+    order: 11,
     defaultOn: true,
   },
   {
@@ -197,7 +186,7 @@ export const SOURCE_REGISTRY: SourceSeed[] = [
     category: "社区",
     type: "精选",
     link: "https://www.douban.com/group",
-    order: 13,
+    order: 12,
     defaultOn: true,
   },
   {
@@ -208,7 +197,7 @@ export const SOURCE_REGISTRY: SourceSeed[] = [
     category: "社区",
     type: "热帖",
     link: "https://bbs.nga.cn",
-    order: 14,
+    order: 13,
     defaultOn: true,
   },
   {
@@ -219,7 +208,7 @@ export const SOURCE_REGISTRY: SourceSeed[] = [
     category: "开发",
     type: "开源精选",
     link: "https://hellogithub.com",
-    order: 15,
+    order: 14,
     defaultOn: true,
   },
   {
@@ -230,7 +219,7 @@ export const SOURCE_REGISTRY: SourceSeed[] = [
     category: "开发",
     type: "Trending",
     link: "https://github.com/trending",
-    order: 16,
+    order: 15,
     defaultOn: true,
   },
   {
@@ -241,7 +230,7 @@ export const SOURCE_REGISTRY: SourceSeed[] = [
     category: "社区",
     type: "最热主题",
     link: "https://www.v2ex.com",
-    order: 17,
+    order: 16,
     defaultOn: true,
   },
   {
@@ -252,7 +241,7 @@ export const SOURCE_REGISTRY: SourceSeed[] = [
     category: "开发",
     type: "Top",
     link: "https://news.ycombinator.com",
-    order: 18,
+    order: 17,
     defaultOn: true,
   },
   {
@@ -264,7 +253,7 @@ export const SOURCE_REGISTRY: SourceSeed[] = [
     category: "财经",
     type: "要闻",
     link: "https://www.reuters.com",
-    order: 19,
+    order: 18,
     defaultOn: true,
   },
   {
@@ -277,7 +266,7 @@ export const SOURCE_REGISTRY: SourceSeed[] = [
     category: "财经",
     type: "国际",
     link: "https://www.reuters.com/world",
-    order: 20,
+    order: 19,
     defaultOn: true,
   },
   {
@@ -290,7 +279,7 @@ export const SOURCE_REGISTRY: SourceSeed[] = [
     category: "财经",
     type: "商业",
     link: "https://www.reuters.com/business",
-    order: 21,
+    order: 20,
     defaultOn: true,
   },
   {
@@ -303,7 +292,7 @@ export const SOURCE_REGISTRY: SourceSeed[] = [
     category: "财经",
     type: "科技",
     link: "https://www.reuters.com/technology",
-    order: 22,
+    order: 21,
     defaultOn: true,
   },
   {
@@ -316,7 +305,7 @@ export const SOURCE_REGISTRY: SourceSeed[] = [
     category: "财经",
     type: "金融",
     link: "https://www.reuters.com/markets",
-    order: 23,
+    order: 22,
     defaultOn: true,
   },
   {
@@ -329,7 +318,7 @@ export const SOURCE_REGISTRY: SourceSeed[] = [
     category: "财经",
     type: "要闻",
     link: "https://www.jin10.com",
-    order: 24,
+    order: 23,
     defaultOn: true,
   },
   {
@@ -341,7 +330,7 @@ export const SOURCE_REGISTRY: SourceSeed[] = [
     category: "财经",
     type: "快讯",
     link: "https://flash.jin10.com",
-    order: 25,
+    order: 24,
     defaultOn: false,
   },
   {
@@ -354,7 +343,7 @@ export const SOURCE_REGISTRY: SourceSeed[] = [
     category: "财经",
     type: "全球头条",
     link: "https://www.bloomberg.com",
-    order: 26,
+    order: 25,
     defaultOn: true,
   },
   {
@@ -367,7 +356,7 @@ export const SOURCE_REGISTRY: SourceSeed[] = [
     category: "财经",
     type: "金融市场",
     link: "https://www.bloomberg.com/markets",
-    order: 27,
+    order: 26,
     defaultOn: true,
   },
   {
@@ -379,7 +368,7 @@ export const SOURCE_REGISTRY: SourceSeed[] = [
     category: "财经",
     type: "资讯",
     link: "https://www.bloomberg.com",
-    order: 28,
+    order: 27,
     defaultOn: false,
   },
   {
@@ -391,7 +380,7 @@ export const SOURCE_REGISTRY: SourceSeed[] = [
     category: "热点",
     type: "热榜",
     link: "https://news.sina.com.cn",
-    order: 29,
+    order: 28,
     defaultOn: true,
   },
   {
@@ -402,7 +391,7 @@ export const SOURCE_REGISTRY: SourceSeed[] = [
     category: "开发",
     type: "极客社区",
     link: "https://www.nodeseek.com/",
-    order: 30,
+    order: 29,
     defaultOn: true,
   },
   {
@@ -413,7 +402,7 @@ export const SOURCE_REGISTRY: SourceSeed[] = [
     category: "社区",
     type: "热门话题",
     link: "https://www.newsmth.net/",
-    order: 31,
+    order: 30,
     defaultOn: true,
   },
   {
@@ -424,7 +413,7 @@ export const SOURCE_REGISTRY: SourceSeed[] = [
     category: "商业",
     type: "深度资讯",
     link: "https://www.huxiu.com/",
-    order: 32,
+    order: 31,
     defaultOn: true,
   },
   {
@@ -435,7 +424,7 @@ export const SOURCE_REGISTRY: SourceSeed[] = [
     category: "科技",
     type: "快讯",
     link: "https://www.ifanr.com/",
-    order: 33,
+    order: 32,
     defaultOn: true,
   },
   {
@@ -446,7 +435,7 @@ export const SOURCE_REGISTRY: SourceSeed[] = [
     category: "消费",
     type: "好物榜",
     link: "https://www.smzdm.com/",
-    order: 34,
+    order: 33,
     defaultOn: true,
   },
   {
@@ -457,7 +446,7 @@ export const SOURCE_REGISTRY: SourceSeed[] = [
     category: "科普",
     type: "科学探索",
     link: "https://www.guokr.com/",
-    order: 35,
+    order: 34,
     defaultOn: true,
   },
   {
@@ -468,7 +457,7 @@ export const SOURCE_REGISTRY: SourceSeed[] = [
     category: "科技",
     type: "创新前沿",
     link: "https://www.geekpark.net/",
-    order: 36,
+    order: 35,
     defaultOn: true,
   },
   {
@@ -479,18 +468,7 @@ export const SOURCE_REGISTRY: SourceSeed[] = [
     category: "开发",
     type: "技术推荐",
     link: "https://www.51cto.com/",
-    order: 37,
-    defaultOn: true,
-  },
-  {
-    key: "csdn",
-    name: "csdn",
-    adapter: "csdn",
-    label: "CSDN",
-    category: "开发",
-    type: "博客热榜",
-    link: "https://blog.csdn.net/",
-    order: 38,
+    order: 36,
     defaultOn: true,
   },
   {
@@ -501,7 +479,7 @@ export const SOURCE_REGISTRY: SourceSeed[] = [
     category: "科技",
     type: "数码生活",
     link: "https://www.dgtle.com/",
-    order: 39,
+    order: 37,
     defaultOn: true,
   },
   {
@@ -512,7 +490,7 @@ export const SOURCE_REGISTRY: SourceSeed[] = [
     category: "社区",
     type: "步行街热帖",
     link: "https://bbs.hupu.com/",
-    order: 40,
+    order: 38,
     defaultOn: true,
   },
   {
@@ -523,7 +501,7 @@ export const SOURCE_REGISTRY: SourceSeed[] = [
     category: "资讯",
     type: "中文要闻",
     link: "https://cn.nytimes.com/",
-    order: 41,
+    order: 39,
     defaultOn: true,
   },
 ];

@@ -1,7 +1,7 @@
 import { config } from "../config.js";
 import { closeDatabase, executeSql, queryOne, queryRows } from "../db/client.js";
 import { runMigrations } from "./migrations.js";
-import type { ScoreLayer, ScoreResult } from "../types.js";
+import type { ScoreResult } from "../types.js";
 
 /**
  * 用户服务自己的评分记录（含最小索引字段：来源/标题/链接）。
@@ -15,12 +15,12 @@ export interface NewsScoreRow {
   title: string;
   url: string;
   ai_score: number;
-  ai_layer: string;
+  ai_layer?: string;
   ai_reason: string;
   ai_model: string;
   prompt_hash: string;
   user_score: number | null;
-  user_layer: string | null;
+  user_layer?: string | null;
   user_reason: string | null;
   is_user_modified: number;
   user_updated_at: string | null;
@@ -41,7 +41,6 @@ export interface SaveAiScoreParams extends NewsIndexFields {
   desc?: string;
   formattedText?: string;
   aiScore: number;
-  aiLayer: ScoreLayer;
   aiReason: string;
   aiModel?: string;
   promptHash?: string;
@@ -52,11 +51,9 @@ export interface SaveUserManualScoreParams extends Partial<NewsIndexFields> {
   desc?: string;
   formattedText?: string;
   userScore?: number | null;
-  userLayer?: ScoreLayer | null;
   userReason?: string | null;
   reset?: boolean;
   aiScore?: number;
-  aiLayer?: ScoreLayer;
   aiReason?: string;
 }
 
@@ -75,19 +72,6 @@ export interface QueryScoreRecordsParams {
   limit?: number;
   offset?: number;
 }
-
-const VALID_LAYERS = new Set<ScoreLayer>(["L1", "L2", "L3", "L4", "L5", "Uncertain"]);
-
-/**
- * 根据分数推断默认分层
- */
-export const inferLayerFromScore = (score: number): ScoreLayer => {
-  if (score >= 90) return "L1";
-  if (score >= 75) return "L2";
-  if (score >= 60) return "L4";
-  if (score >= 40) return "Uncertain";
-  return "L5";
-};
 
 let initPromise: Promise<void> | null = null;
 
@@ -124,7 +108,7 @@ const mapDbRow = (row: any): NewsScoreRow => {
     title: String(row.title || ""),
     url: String(row.url || ""),
     ai_score: Number(row.ai_score ?? -1),
-    ai_layer: String(row.ai_layer || "Uncertain"),
+    ai_layer: row.ai_layer ? String(row.ai_layer) : undefined,
     ai_reason: String(row.ai_reason || ""),
     ai_model: String(row.ai_model || ""),
     prompt_hash: String(row.prompt_hash || ""),
@@ -146,18 +130,7 @@ const mapDbRow = (row: any): NewsScoreRow => {
  */
 export const rowToScoreResult = (row: NewsScoreRow, fromCache: boolean): ScoreResult => {
   const isUserModified = Boolean(row.is_user_modified) && typeof row.user_score === "number";
-  const aiLayer: ScoreLayer = VALID_LAYERS.has(row.ai_layer as ScoreLayer)
-    ? (row.ai_layer as ScoreLayer)
-    : "Uncertain";
-  const userLayer: ScoreLayer | null =
-    row.user_layer && VALID_LAYERS.has(row.user_layer as ScoreLayer)
-      ? (row.user_layer as ScoreLayer)
-      : isUserModified && typeof row.user_score === "number"
-        ? inferLayerFromScore(row.user_score)
-        : null;
-
   const effectiveScore = isUserModified ? (row.user_score as number) : row.ai_score;
-  const effectiveLayer: ScoreLayer = isUserModified && userLayer ? userLayer : aiLayer;
   const effectiveReason =
     isUserModified && row.user_reason && row.user_reason.trim()
       ? row.user_reason
@@ -167,13 +140,10 @@ export const rowToScoreResult = (row: NewsScoreRow, fromCache: boolean): ScoreRe
     id: row.id,
     newsHash: row.news_hash,
     score: effectiveScore,
-    layer: effectiveLayer,
     reason: effectiveReason,
     aiScore: row.ai_score,
-    aiLayer,
     aiReason: row.ai_reason,
     userScore: row.user_score,
-    userLayer,
     userReason: row.user_reason,
     isUserModified: Boolean(row.is_user_modified),
     userUpdatedAt: row.user_updated_at,
@@ -257,15 +227,14 @@ export const saveAiScoreRecord = async (
     `
     INSERT INTO user_news_states (
       user_id, news_hash, source, title, url,
-      ai_score, ai_layer, ai_reason, ai_model, prompt_hash,
+      ai_score, ai_reason, ai_model, prompt_hash,
       created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(user_id, news_hash) DO UPDATE SET
       source = CASE WHEN excluded.source != '' THEN excluded.source ELSE user_news_states.source END,
       title = CASE WHEN excluded.title != '' THEN excluded.title ELSE user_news_states.title END,
       url = CASE WHEN excluded.url != '' THEN excluded.url ELSE user_news_states.url END,
       ai_score = excluded.ai_score,
-      ai_layer = excluded.ai_layer,
       ai_reason = excluded.ai_reason,
       ai_model = excluded.ai_model,
       prompt_hash = excluded.prompt_hash,
@@ -278,7 +247,6 @@ export const saveAiScoreRecord = async (
       (params.title || "").trim(),
       (params.url || "").trim(),
       params.aiScore,
-      params.aiLayer,
       params.aiReason,
       aiModel,
       params.promptHash || "",
@@ -343,10 +311,6 @@ export const saveUserManualScore = async (
     }
 
     const clampedScore = Math.max(0, Math.min(100, Math.round(params.userScore)));
-    const resolvedLayer: ScoreLayer =
-      params.userLayer && VALID_LAYERS.has(params.userLayer)
-        ? params.userLayer
-        : inferLayerFromScore(clampedScore);
     const resolvedReason =
       typeof params.userReason === "string" ? params.userReason.trim() : existing.user_reason;
 
@@ -354,7 +318,6 @@ export const saveUserManualScore = async (
       `
       UPDATE user_news_states
       SET user_score = ?,
-          user_layer = ?,
           user_reason = ?,
           is_user_modified = 1,
           user_updated_at = ?,
@@ -366,7 +329,6 @@ export const saveUserManualScore = async (
       `,
       [
         clampedScore,
-        resolvedLayer,
         resolvedReason ?? null,
         now,
         now,
@@ -392,10 +354,6 @@ export const saveUserManualScore = async (
   }
 
   const clampedScore = Math.max(0, Math.min(100, Math.round(params.userScore)));
-  const resolvedLayer: ScoreLayer =
-    params.userLayer && VALID_LAYERS.has(params.userLayer)
-      ? params.userLayer
-      : inferLayerFromScore(clampedScore);
   const resolvedReason =
     typeof params.userReason === "string" ? params.userReason.trim() : null;
 
@@ -403,8 +361,6 @@ export const saveUserManualScore = async (
     typeof params.aiScore === "number" && !Number.isNaN(params.aiScore)
       ? Math.max(0, Math.min(100, Math.round(params.aiScore)))
       : clampedScore;
-  const initialAiLayer: ScoreLayer =
-    params.aiLayer && VALID_LAYERS.has(params.aiLayer) ? params.aiLayer : resolvedLayer;
   const initialAiReason =
     typeof params.aiReason === "string" && params.aiReason.trim()
       ? params.aiReason.trim()
@@ -414,13 +370,12 @@ export const saveUserManualScore = async (
     `
     INSERT INTO user_news_states (
       user_id, news_hash, source, title, url,
-      ai_score, ai_layer, ai_reason, ai_model, prompt_hash,
-      user_score, user_layer, user_reason, is_user_modified, user_updated_at,
+      ai_score, ai_reason, ai_model, prompt_hash,
+      user_score, user_reason, is_user_modified, user_updated_at,
       created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, 1, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, '', ?, ?, 1, ?, ?, ?)
     ON CONFLICT(user_id, news_hash) DO UPDATE SET
       user_score = excluded.user_score,
-      user_layer = excluded.user_layer,
       user_reason = excluded.user_reason,
       is_user_modified = 1,
       user_updated_at = excluded.user_updated_at,
@@ -429,7 +384,6 @@ export const saveUserManualScore = async (
       title = CASE WHEN excluded.title != '' THEN excluded.title ELSE user_news_states.title END,
       url = CASE WHEN excluded.url != '' THEN excluded.url ELSE user_news_states.url END,
       ai_score = CASE WHEN user_news_states.ai_score < 0 THEN excluded.ai_score ELSE user_news_states.ai_score END,
-      ai_layer = CASE WHEN user_news_states.ai_score < 0 THEN excluded.ai_layer ELSE user_news_states.ai_layer END,
       ai_reason = CASE WHEN user_news_states.ai_score < 0 THEN excluded.ai_reason ELSE user_news_states.ai_reason END
     `,
     [
@@ -439,11 +393,9 @@ export const saveUserManualScore = async (
       (params.title || "").trim(),
       (params.url || "").trim(),
       initialAiScore,
-      initialAiLayer,
       initialAiReason,
       config.DEEPSEEK_MODEL || "",
       clampedScore,
-      resolvedLayer,
       resolvedReason,
       now,
       now,
@@ -515,9 +467,9 @@ export const saveNewsReadStatus = async (
     `
     INSERT INTO user_news_states (
       user_id, news_hash, source, title, url,
-      ai_score, ai_layer, ai_reason, ai_model, prompt_hash,
+      ai_score, ai_reason, ai_model, prompt_hash,
       is_read, read_at, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, -1, 'Uncertain', '', '', '', ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, -1, '', '', '', ?, ?, ?, ?)
     ON CONFLICT(user_id, news_hash) DO UPDATE SET
       is_read = excluded.is_read,
       read_at = CASE WHEN excluded.is_read = 1

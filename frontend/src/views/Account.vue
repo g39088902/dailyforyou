@@ -92,7 +92,7 @@
             :bordered="false"
           >
             <div v-if="testResult.ok">
-              解析成功：score={{ testResult.parsed?.score }}，layer={{ testResult.parsed?.layer }}，reason={{
+              解析成功：score={{ testResult.parsed?.score }}，reason={{
                 testResult.parsed?.reason || "（空）"
               }}
             </div>

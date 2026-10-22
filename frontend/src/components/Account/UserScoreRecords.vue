@@ -78,7 +78,6 @@
           <div class="score-pill ai">
             <span class="pill-label">AI 初评:</span>
             <span class="pill-val">{{ item.aiScore >= 0 ? `${item.aiScore}分` : '未评分' }}</span>
-            <span v-if="item.aiLayer" class="pill-layer">({{ item.aiLayer }})</span>
           </div>
 
           <span class="arrow">→</span>
@@ -86,7 +85,6 @@
           <div :class="['score-pill user', getScoreClass(item.userScore)]">
             <span class="pill-label">手动调整:</span>
             <span class="pill-val">{{ item.userScore }}分</span>
-            <span v-if="item.userLayer" class="pill-layer">({{ item.userLayer }})</span>
           </div>
         </div>
 
@@ -128,7 +126,7 @@
                       @update:value="(v) => (activeEditScore[item.id] = v)"
                     />
                     <span class="slider-num">
-                      {{ activeEditScore[item.id] ?? item.userScore }}分 · {{ getLayerByScore(activeEditScore[item.id] ?? item.userScore) }}
+                      {{ activeEditScore[item.id] ?? item.userScore }}分
                     </span>
                   </div>
                   <div class="btn-row">
@@ -189,7 +187,7 @@ import { onMounted, reactive, ref } from "vue";
 import { Refresh, Search } from "@icon-park/vue-next";
 import { mainStore } from "@/store";
 import { getUserModifiedRecords, resetManualScore, updateManualScore } from "@/api";
-import { getScoreClass, getLayerByScore } from "@/components/Stream/utils/scoreUtils";
+import { getScoreClass } from "@/components/Stream/utils/scoreUtils";
 
 const store = mainStore();
 
@@ -292,13 +290,11 @@ const handleQuickAdjust = async (item, newScore) => {
       source: item.source,
       url: item.url,
       userScore: newScore,
-      userLayer: getLayerByScore(newScore),
     });
     if (res?.code === 200) {
       window.$message?.success(`已更新为 ${newScore} 分`);
       // 局部更新记录状态
       item.userScore = newScore;
-      item.userLayer = getLayerByScore(newScore);
       item.userUpdatedAt = new Date().toISOString();
     } else {
       window.$message?.error(res?.message || "更新失败");
@@ -470,11 +466,6 @@ defineExpose({
 
         .pill-val {
           font-weight: bold;
-        }
-
-        .pill-layer {
-          font-size: 11px;
-          opacity: 0.85;
         }
       }
     }

@@ -7,15 +7,6 @@ export const getScoreClass = (score) => {
   return "score-l5";
 };
 
-// 根据分数段推断对应的层级标签
-export const getLayerByScore = (score) => {
-  if (score >= 90) return "L1";
-  if (score >= 75) return "L2";
-  if (score >= 60) return "L4";
-  if (score >= 40) return "Uncertain";
-  return "L5";
-};
-
 // 评分胶囊悬浮提示信息
 export const getScoreTooltip = (item) => {
   const parts = [];

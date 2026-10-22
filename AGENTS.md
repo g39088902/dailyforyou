@@ -280,7 +280,7 @@ Stream View 是 DailyForYou 最核心的沉浸式情报瀑布流，各模块职�
 | **多信源并发抓取调度** | `frontend/src/components/Stream/composables/useStreamSources.js` | `fetchAllSources()`、各信源加载进度计数 |
 | **评分队列、缓存速查与帧缓冲** | `frontend/src/components/Stream/composables/useStreamScoring.js` | `queryCachedScoresBatch()` (毫秒级先查)<br/>`scoreQueue` (工作队列并发)<br/>`flushPendingScores()` (防抖刷入视图) |
 | **已读状态追踪与后端同步** | `frontend/src/components/Stream/composables/useStreamReadStatus.js` | `initReadObserver()` (交叉观察器视口检测)<br/>`markAsRead()`<br/>`syncReadStatusToBackend()` |
-| **色彩与层级工具函数** | `frontend/src/components/Stream/utils/scoreUtils.js` | `getLayerByScore()`、`getScoreColor()` |
+| **色彩工具函数** | `frontend/src/components/Stream/utils/scoreUtils.js` | `getScoreClass()`、`getScoreTooltip()` |
 
 ---
 

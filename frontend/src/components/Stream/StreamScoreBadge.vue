@@ -18,7 +18,7 @@
         :style="{ width: `${displayScore}%` }"
       />
       <span class="score-progress-label">
-        {{ displayScore }}分 · {{ getLayerByScore(displayScore) }}
+        {{ displayScore }}分
       </span>
       <input
         type="range"
@@ -51,7 +51,6 @@
       ]"
     >
       {{ item._score }}分
-      <span v-if="item._layer" class="score-layer">· {{ item._layer }}</span>
       <span
         v-if="item._fromCache"
         class="cache-badge"
@@ -75,7 +74,7 @@
 
 <script setup>
 import { ref, computed } from "vue";
-import { getScoreClass, getLayerByScore, getScoreTooltip } from "./utils/scoreUtils";
+import { getScoreClass, getScoreTooltip } from "./utils/scoreUtils";
 
 const props = defineProps({
   item: {
@@ -119,7 +118,6 @@ const handleInput = (event) => {
 
 const handleCommit = (event) => {
   const newScore = Math.max(0, Math.min(100, Math.round(Number(event.target.value))));
-  const newLayer = getLayerByScore(newScore);
 
   isDragging.value = false;
   previewScore.value = null;
@@ -127,7 +125,6 @@ const handleCommit = (event) => {
   emit("commit", {
     item: props.item,
     newScore,
-    newLayer,
   });
 };
 </script>
@@ -233,12 +230,6 @@ const handleCommit = (event) => {
   line-height: 22px;
   padding: 0 8px;
   cursor: pointer;
-
-  .score-layer {
-    font-weight: 500;
-    opacity: 0.9;
-    margin-left: 2px;
-  }
 
   .cache-badge {
     margin-left: 4px;

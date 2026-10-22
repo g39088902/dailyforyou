@@ -16,7 +16,7 @@ const routeOwnedTitles = new Map<string, Set<string>>();
 
 // 常见尾部来源后缀正则（如 "- Reuters", "- Bloomberg", "| 界面新闻" 等）
 const TRAILING_SOURCE_REGEX =
-  /\s*[-—–_|｜·]\s*(Reuters|Bloomberg|NYTimes|The\s+New\s+York\s+Times|Hacker\s+News|V2EX|路透社?|彭博社?|纽约时报|界面新闻|界面快报|财联社|金十数据|新浪新闻|新浪财经|腾讯新闻|澎湃新闻|36氪|IT之家|虎嗅网?|少数派|今日头条|稀土掘金|哔哩哔哩|bilibili)\s*$/i;
+  /\s*[-—–_|｜·]\s*(Reuters|Bloomberg|NYTimes|The\s+New\s+York\s+Times|Hacker\s+News|V2EX|路透社?|彭博社?|纽约时报|界面新闻|界面快报|财联社|金十数据|新浪新闻|新浪财经|腾讯新闻|澎湃新闻|36氪|IT之家|虎嗅网?|少数派|稀土掘金|哔哩哔哩|bilibili)\s*$/i;
 
 /**
  * 归一化文章标题：

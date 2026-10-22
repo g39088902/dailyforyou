@@ -13,7 +13,7 @@ set -euo pipefail
 
 REMOTE="${REMOTE:-root@134.175.155.179}"
 REMOTE_DIR="${REMOTE_DIR:-/opt/dailyhot}"
-SITE="${SITE:-http://134.175.155.179:8081}"
+SITE="${SITE:-https://134.175.155.179:8081}"
 TARGET="${1:-all}"
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -62,8 +62,8 @@ deploy_crawler() {
   ssh "${SSH_OPTS[@]}" "$REMOTE" "cd $REMOTE_DIR/crawler && pnpm install --prod --frozen-lockfile" \
     || fail "依赖安装失败"
 
-  info "重启 dailyhot-crawler"
-  ssh "${SSH_OPTS[@]}" "$REMOTE" "pm2 restart dailyhot-crawler --update-env" || fail "重启失败"
+  info "重启 dailyhot-crawler（若已注册 PM2）"
+  ssh "${SSH_OPTS[@]}" "$REMOTE" "if pm2 describe dailyhot-crawler >/dev/null 2>&1; then pm2 restart dailyhot-crawler --update-env; else echo 'dailyhot-crawler 未在云端 PM2 运行（爬虫采用离线/家用物理机调度），跳过重启'; fi"
   ok "爬虫服务已更新"
 }
 
@@ -108,7 +108,7 @@ deploy_frontend() {
 expect_code() {
   local path="$1" expect="$2" label="$3" tries=15 code=""
   for _ in $(seq 1 "$tries"); do
-    code=$(curl -s -o /dev/null -w '%{http_code}' -m 5 "$SITE$path")
+    code=$(curl -k -s -o /dev/null -w '%{http_code}' -m 5 "$SITE$path")
     if [ "$code" = "$expect" ]; then
       return 0
     fi
@@ -127,7 +127,7 @@ health_check() {
 
   # 确认爬虫状态正常
   local health_resp
-  health_resp=$(curl -s -m 10 "$SITE/api/health")
+  health_resp=$(curl -k -s -m 10 "$SITE/api/health")
   info "服务器健康状态: $health_resp"
 
   ok "站点 $SITE 正常（/api/sources, /api/logo, /api/health, /api/auth 均就绪）"

@@ -13,7 +13,7 @@ import {
   type SaveNewsReadStatusParams,
   type NewsScoreRow,
 } from "./scoreDb.js";
-import type { ScoreLayer, ScoreResult } from "../types.js";
+import type { ScoreResult } from "../types.js";
 import { buildScoreMessages } from "./scorePrompt.js";
 
 export interface ScoreInputItem {
@@ -43,8 +43,6 @@ export interface ScoreOptions {
   forceRescore?: boolean;
   concurrency?: number;
 }
-
-const VALID_LAYERS = new Set<ScoreLayer>(["L1", "L2", "L3", "L4", "L5", "Uncertain"]);
 
 /**
  * 计算规范化新闻文本的唯一哈希（用于唯一索引与缓存键）
@@ -171,16 +169,6 @@ const pickScoreValue = (obj: any): number | null => {  for (const key of ["score
   return null;
 };
 
-const pickLayerValue = (obj: any): ScoreLayer | null => {
-  for (const key of ["layer", "Layer", "层级", "等级"]) {
-    const value = obj?.[key];
-    if (typeof value === "string" && VALID_LAYERS.has(value.trim() as ScoreLayer)) {
-      return value.trim() as ScoreLayer;
-    }
-  }
-  return null;
-};
-
 const pickReasonValue = (obj: any): string => {
   for (const key of ["reason", "Reason", "理由", "依据", "说明"]) {
     const value = obj?.[key];
@@ -190,10 +178,10 @@ const pickReasonValue = (obj: any): string => {
 };
 
 /**
- * 解析模型返回内容，四级降级：
+ * 解析模型返回内容，三级降级：
  * 1. 去代码围栏 + 截取首尾大括号后 JSON.parse
- * 2. 宽松字段名（score/评分/分数、layer/层级、reason/理由）
- * 3. 仅含数字时取首个 0~100 数字，层级按分数推断，标记 degraded
+ * 2. 宽松字段名（score/评分/分数、reason/理由）
+ * 3. 仅含数字时取首个 0~100 数字，标记 degraded
  * 4. 全部失败返回 null（调用方决定不写库）
  */
 export const parseScoreResponse = (rawContent: string): ScoreResult | null => {
@@ -217,11 +205,8 @@ export const parseScoreResponse = (rawContent: string): ScoreResult | null => {
       return null;
     }
     const score = Math.max(0, Math.min(100, Math.round(rawScore)));
-    // 用户可自定义输出格式：层级缺失时按分数推断，避免写入 Uncertain 造成排序失真
-    const layer = pickLayerValue(parsed) ?? inferScoreLayer(score);
     return {
       score,
-      layer,
       reason: pickReasonValue(parsed),
     };
   } catch {
@@ -238,7 +223,6 @@ export const parseScoreResponse = (rawContent: string): ScoreResult | null => {
       );
       return {
         score,
-        layer: inferScoreLayer(score),
         reason: "模型未返回结构化理由",
         degraded: true,
       };
@@ -246,14 +230,6 @@ export const parseScoreResponse = (rawContent: string): ScoreResult | null => {
   }
 
   return null;
-};
-
-const inferScoreLayer = (score: number): ScoreLayer => {
-  if (score >= 90) return "L1";
-  if (score >= 75) return "L2";
-  if (score >= 60) return "L4";
-  if (score >= 40) return "Uncertain";
-  return "L5";
 };
 
 export interface ScoreCompletionResult {
@@ -383,7 +359,6 @@ export const scoreNewsItem = async (
   if (!formattedText || !newsHash) {
     return {
       score: 0,
-      layer: "Uncertain",
       reason: "新闻内容为空",
       fromCache: false,
     };
@@ -425,7 +400,6 @@ export const scoreNewsItem = async (
       url: meta.url,
       formattedText,
       aiScore: parsed.score,
-      aiLayer: parsed.layer,
       aiReason: parsed.reason,
       aiModel: completion.model,
       promptHash: ctx.promptHash,
@@ -436,7 +410,7 @@ export const scoreNewsItem = async (
       : "";
 
     logger.info(
-      `🎯 [Scorer] 已评分并入库 user=${ctx.userId} (${parsed.score} | ${parsed.layer}): ${formattedText.slice(0, 40)}...${tokenInfo}`,
+      `🎯 [Scorer] 已评分并入库 user=${ctx.userId} (${parsed.score}): ${formattedText.slice(0, 40)}...${tokenInfo}`,
     );
 
     return {
@@ -451,7 +425,6 @@ export const scoreNewsItem = async (
       ...parsed,
       newsHash,
       aiScore: parsed.score,
-      aiLayer: parsed.layer,
       aiReason: parsed.reason,
       isUserModified: false,
       isRead: false,
@@ -466,15 +439,12 @@ export interface ManualScoreInput extends ScoreInputItem {
   newsHash?: string;
   userScore?: number | null;
   score?: number | null;
-  userLayer?: ScoreLayer | null;
-  layer?: ScoreLayer | null;
   userReason?: string | null;
   reason?: string | null;
   comment?: string | null;
   feedback?: string | null;
   reset?: boolean;
   aiScore?: number;
-  aiLayer?: ScoreLayer;
   aiReason?: string;
 }
 
@@ -512,7 +482,6 @@ export const updateManualScoreItem = async (
     userScore = undefined;
   }
 
-  const rawLayer = (payload.userLayer ?? payload.layer) as ScoreLayer | null | undefined;
   const rawReason =
     payload.userReason ?? payload.reason ?? payload.comment ?? payload.feedback ?? undefined;
 
@@ -525,11 +494,9 @@ export const updateManualScoreItem = async (
     url: meta.url,
     formattedText: meta.formattedText || undefined,
     userScore,
-    userLayer: rawLayer,
     userReason: typeof rawReason === "string" ? rawReason : null,
     reset: payload.reset === true || rawScore === null,
     aiScore: typeof payload.aiScore === "number" ? payload.aiScore : undefined,
-    aiLayer: payload.aiLayer,
     aiReason: typeof payload.aiReason === "string" ? payload.aiReason : undefined,
   };
 
@@ -635,7 +602,6 @@ export const scoreNewsBatch = async <T extends string | ScoreInputItem>(
         );
         const fallback: ScoreResult = {
           score: 50,
-          layer: "Uncertain",
           reason: "评分失败降级[待复核]",
           fromCache: false,
         };

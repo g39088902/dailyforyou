@@ -7,7 +7,7 @@ export const MAX_SCORE_CONCURRENCY = 10;
 
 export function useStreamScoring({ onScoreReadSync, isAborted = () => false } = {}) {
   const authStore = useAuthStore();
-  // key: _uniqueKey -> { status: 'pending' | 'scoring' | 'done' | 'error', score?: number, layer?: string, reason?: string, newsHash?: string, isUserModified?: boolean, fromCache?: boolean, isRead?: boolean }
+  // key: _uniqueKey -> { status: 'pending' | 'scoring' | 'done' | 'error', score?: number, reason?: string, newsHash?: string, isUserModified?: boolean, fromCache?: boolean, isRead?: boolean }
   const scoreMap = reactive({});
   const scoreQueue = [];
   const activeScoreWorkers = ref(0);
@@ -99,7 +99,6 @@ export function useStreamScoring({ onScoreReadSync, isAborted = () => false } = 
 
   const extractAndBufferScoreResult = (uniqueKey, res) => {
     const scoreVal = res?.score ?? res?.data?.score;
-    const layerVal = res?.layer ?? res?.data?.layer;
     const reasonVal = res?.reason ?? res?.data?.reason;
     const newsHashVal = res?.newsHash ?? res?.data?.newsHash;
     const isUserModifiedVal = Boolean(
@@ -124,7 +123,6 @@ export function useStreamScoring({ onScoreReadSync, isAborted = () => false } = 
       pendingScoreUpdates.set(uniqueKey, {
         status: "done",
         score: scoreVal,
-        layer: layerVal || "",
         reason: reasonVal || "",
         newsHash: newsHashVal || "",
         isUserModified: isUserModifiedVal,
@@ -320,7 +318,7 @@ export function useStreamScoring({ onScoreReadSync, isAborted = () => false } = 
     pumpScoreQueue(runId);
   };
 
-  const commitManualScore = async ({ item, newScore, newLayer }) => {
+  const commitManualScore = async ({ item, newScore }) => {
     if (!authStore.isAuthed) {
       window.$message?.info("登录后才能保存评分修正");
       emitAuthEvent(AUTH_EVENTS.OPEN_LOGIN);
@@ -340,7 +338,6 @@ export function useStreamScoring({ onScoreReadSync, isAborted = () => false } = 
       ...(prevInfo || {}),
       status: "done",
       score: newScore,
-      layer: newLayer,
       isUserModified: true,
     };
 
@@ -352,7 +349,6 @@ export function useStreamScoring({ onScoreReadSync, isAborted = () => false } = 
         source: item._sourceLabel || item._sourceName || "",
         url: item.url || item.mobileUrl || "",
         userScore: newScore,
-        userLayer: newLayer,
       });
 
       const savedData = res?.data || res;
@@ -361,7 +357,6 @@ export function useStreamScoring({ onScoreReadSync, isAborted = () => false } = 
           ...(scoreMap[uniqueKey] || {}),
           status: "done",
           score: savedData.score,
-          layer: savedData.layer || newLayer,
           reason: savedData.reason || prevInfo?.reason || "",
           newsHash: savedData.newsHash || prevInfo?.newsHash,
           isUserModified: true,
@@ -369,7 +364,7 @@ export function useStreamScoring({ onScoreReadSync, isAborted = () => false } = 
           isRead: Boolean(savedData.isRead ?? prevInfo?.isRead ?? item._isRead),
         };
       }
-      window.$message?.success(`已修正评分为 ${newScore} 分 (${newLayer})`);
+      window.$message?.success(`已修正评分为 ${newScore} 分`);
     } catch (err) {
       console.error("保存手动评分修正失败:", err);
       if (prevInfo) {

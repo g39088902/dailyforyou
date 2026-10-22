@@ -283,7 +283,6 @@ const allArticles = computed(() => {
 
         const scoreStatus = scoreInfo?.status || "idle";
         const score = hasScore ? scoreInfo.score : undefined;
-        const layer = hasScore ? scoreInfo.layer : undefined;
         const reason = hasScore ? scoreInfo.reason : undefined;
         const resolvedHash = newsHash || undefined;
         const isUserModified = hasScore ? Boolean(scoreInfo.isUserModified) : false;
@@ -304,7 +303,6 @@ const allArticles = computed(() => {
           prevObj._originalIndex === currentOriginalIndex &&
           prevObj._scoreStatus === scoreStatus &&
           prevObj._score === score &&
-          prevObj._layer === layer &&
           prevObj._reason === reason &&
           prevObj._newsHash === resolvedHash &&
           prevObj._isUserModified === isUserModified &&
@@ -328,7 +326,6 @@ const allArticles = computed(() => {
           _uniqueKey: uniqueKey,
           _scoreStatus: scoreStatus,
           _score: score,
-          _layer: layer,
           _reason: reason,
           _newsHash: resolvedHash,
           _isUserModified: isUserModified,
