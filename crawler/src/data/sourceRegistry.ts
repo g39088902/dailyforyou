@@ -67,17 +67,6 @@ export const SOURCE_REGISTRY: SourceSeed[] = [
     defaultOn: true,
   },
   {
-    key: "douyin",
-    name: "douyin",
-    adapter: "douyin",
-    label: "抖音",
-    category: "热点",
-    type: "热搜榜",
-    link: "https://www.douyin.com",
-    order: 1,
-    defaultOn: true,
-  },
-  {
     key: "36kr",
     name: "36kr",
     adapter: "36kr",

@@ -30,4 +30,5 @@ logs/
 
 # Tooling / internal
 .workbuddy/
+.workbuddy-ai/
 coverage/
