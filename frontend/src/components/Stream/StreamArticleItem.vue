@@ -46,6 +46,9 @@
           <n-text class="hot-text" :depth="3" v-html="item.hot" />
         </div>
 
+        <!-- 内容时间：让「新旧」可直接感知，也是 48 小时窗口的可见依据 -->
+        <n-text v-if="ageText" :depth="3" class="news-age">{{ ageText }}</n-text>
+
         <!-- AI 评分徽章 -->
         <stream-score-badge
           :item="item"
@@ -92,11 +95,13 @@
 </template>
 
 <script setup>
+import { computed } from "vue";
 import { Fire } from "@icon-park/vue-next";
 import { resolveLogoUrl } from "@/api";
+import { formatNewsAge } from "@/utils/getTime";
 import StreamScoreBadge from "./StreamScoreBadge.vue";
 
-defineProps({
+const props = defineProps({
   item: {
     type: Object,
     required: true,
@@ -109,9 +114,24 @@ defineProps({
     type: [Number, String],
     default: 14,
   },
+  // 由 Stream.vue 每 60 秒推一次，避免每个条目各自起定时器
+  nowMs: {
+    type: Number,
+    default: 0,
+  },
 });
 
 defineEmits(["click", "filter-source", "toggle-read", "commit-score"]);
+
+// timestamp = pub_time || created_at：前者可能是 "0"（适配器解析失败）或毫秒 epoch 字符串，
+// 后者一定是 ISO。前者不可用时回退到入库时间，两者都不可用就不渲染。
+const ageText = computed(() => {
+  const now = props.nowMs || Date.now();
+  return (
+    formatNewsAge(props.item.timestamp, now) ||
+    formatNewsAge(props.item.createdAt, now)
+  );
+});
 </script>
 
 <style lang="scss" scoped>
@@ -186,10 +206,15 @@ defineEmits(["click", "filter-source", "toggle-read", "commit-score"]);
         padding: 0 8px;
         border-radius: 11px;
         white-space: nowrap;
-
         .hot-text {
           color: inherit;
         }
+      }
+
+      .news-age {
+        font-size: 12px;
+        white-space: nowrap;
+        opacity: 0.75;
       }
 
       .read-status-tag {

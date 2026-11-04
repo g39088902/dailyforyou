@@ -36,6 +36,16 @@
       @filter="filterBySource"
     />
 
+    <!-- 当前筛选的信源已停更时，说明列表里看到的是哪个时段的内容 -->
+    <n-alert
+      v-if="filteredSourceHealth.label && filteredSourceLabel"
+      type="warning"
+      :bordered="false"
+      class="stale-banner"
+    >
+      「{{ filteredSourceLabel }}」{{ filteredSourceHealth.label }}，下面展示的是它最近抓到过的内容。
+    </n-alert>
+
     <!-- 聚合主列表（不分页，已打分按分数降序，未打分按原顺序） -->
     <n-card class="stream-card" :bordered="false">
       <!-- 初始未就绪或未初始化状态 -->
@@ -69,6 +79,29 @@
           </n-text>
         </div>
         <n-skeleton text round :repeat="10" height="38px" style="margin-top: 20px" />
+      </div>
+
+      <div
+        v-else-if="emptyByAgeKeys.length > 0 && allArticles.length === 0 && !isLoading"
+        class="empty-state"
+      >
+        <n-empty :description="`近 ${windowHours} 小时没有新内容`">
+          <template #extra>
+            <n-space justify="center">
+              <n-button
+                size="small"
+                type="primary"
+                :loading="loadingOlder"
+                @click="loadOlder"
+              >
+                查看更早内容
+              </n-button>
+              <n-button size="small" secondary strong @click="router.push('/setting')">
+                检查信源状态
+              </n-button>
+            </n-space>
+          </template>
+        </n-empty>
       </div>
 
       <div v-else-if="allArticles.length === 0 && !isLoading" class="empty-state">
@@ -113,6 +146,7 @@
             :item="item"
             :index="index"
             :font-size="store.listFontSize"
+            :now-ms="nowMs"
             @click="jumpLink"
             @filter-source="filterBySource"
             @toggle-read="toggleReadStatus"
@@ -143,10 +177,11 @@
 </template>
 
 <script setup>
-import { computed, onActivated, onBeforeUnmount, onMounted, watch } from "vue";
+import { computed, onActivated, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { mainStore } from "@/store";
 import { useAuthStore } from "@/store/auth";
+import { deriveSourceHealth } from "@/utils/sourceHealth";
 
 import StreamHeader from "@/components/Stream/StreamHeader.vue";
 import StreamSourceNav from "@/components/Stream/StreamSourceNav.vue";
@@ -206,6 +241,8 @@ const {
   currentSourceFilter,
   sourceDataMap,
   sourceLoadingMap,
+  windowHours,
+  emptyByAgeKeys,
   isLoading,
   currentFetchingSourceLabel,
   visibleSources,
@@ -215,6 +252,7 @@ const {
   progressPercentage,
   filterBySource,
   loadAllSourcesSequentially,
+  refetchSources,
   abort,
   isAborted,
 } = useStreamSources({
@@ -367,6 +405,50 @@ const displayedArticles = computed(() => {
   return allArticles.value.filter((item) => !item._isRead);
 });
 
+// 6. 时间窗相关：条目相对时间、当前频道停更提示、查看更早内容
+// 60 秒一跳即可，不能用 store.timeData（秒级），否则几百个条目每秒重渲染。
+const nowMs = ref(Date.now());
+let nowTimer = null;
+
+// 当前筛选信源的健康度：优先用列表响应里的 lastItemAt（本次请求最新），
+// 退回 /sources 的 stats（启动时拉的，可能略旧）。
+const filteredSourceLabel = computed(() =>
+  currentSourceFilter.value
+    ? store.sources.find((source) => source.key === currentSourceFilter.value)
+        ?.label || ""
+    : ""
+);
+
+const filteredSourceHealth = computed(() => {
+  const key = currentSourceFilter.value;
+  if (!key) return { level: "unknown", hours: null, label: "" };
+
+  const res = sourceDataMap[key];
+  const stats = res?.lastItemAt
+    ? { lastItemAt: res.lastItemAt }
+    : store.sources.find((source) => source.key === key)?.stats;
+
+  return deriveSourceHealth(stats, nowMs.value);
+});
+
+const loadingOlder = ref(false);
+
+// 只重拉「窗口内为空但历史有数据」的信源，有筛选时只重拉当前这一个，
+// 避免一次性把全部频道的历史条目都放出来。
+const loadOlder = async () => {
+  const keys = currentSourceFilter.value
+    ? [currentSourceFilter.value]
+    : emptyByAgeKeys.value;
+  if (keys.length === 0) return;
+
+  loadingOlder.value = true;
+  try {
+    await refetchSources(keys, { maxAgeHours: 0 });
+  } finally {
+    loadingOlder.value = false;
+  }
+};
+
 const streamStats = computed(() => {
   const list = allArticles.value;
   let scored = 0;
@@ -427,6 +509,9 @@ onMounted(() => {
   initReadObserver();
   loadReadHashesFromBackend();
   loadAllSourcesSequentially(false);
+  nowTimer = setInterval(() => {
+    nowMs.value = Date.now();
+  }, 60_000);
 });
 
 onActivated(() => {
@@ -440,6 +525,10 @@ onBeforeUnmount(() => {
   abort();
   cleanupScoring();
   cleanupReadObserver();
+  if (nowTimer) {
+    clearInterval(nowTimer);
+    nowTimer = null;
+  }
 });
 </script>
 
@@ -451,6 +540,10 @@ onBeforeUnmount(() => {
   padding-bottom: 60px;
 
   .degraded-banner {
+    border-radius: 8px;
+  }
+
+  .stale-banner {
     border-radius: 8px;
   }
 

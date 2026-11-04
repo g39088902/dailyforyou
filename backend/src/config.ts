@@ -33,6 +33,7 @@ export type Config = {
   SCORE_RATE_LIMIT_PER_MIN: number;
   PROMPT_TEST_RATE_LIMIT_PER_MIN: number;
   CRAWL_INTERVAL_MINUTES: number;
+  NEWS_MAX_AGE_HOURS: number;
 };
 
 // 验证并提取环境变量
@@ -95,4 +96,8 @@ export const config: Config = {
   SCORE_RATE_LIMIT_PER_MIN: getNumericEnvVariable("SCORE_RATE_LIMIT_PER_MIN", 600),
   PROMPT_TEST_RATE_LIMIT_PER_MIN: getNumericEnvVariable("PROMPT_TEST_RATE_LIMIT_PER_MIN", 5),
   CRAWL_INTERVAL_MINUTES: getNumericEnvVariable("CRAWL_INTERVAL_MINUTES", 120),
+  // 新闻可见窗口（小时）：只下发「首次入库时间」在窗口内的条目，0 = 不限。
+  // 时间口径是 news_items.created_at（首次 INSERT 写入、upsert 冲突不覆盖），不是上游 pub_time。
+  // 灰度时可先设为 0 观察，确认无误再改回 48。
+  NEWS_MAX_AGE_HOURS: getNumericEnvVariable("NEWS_MAX_AGE_HOURS", 48),
 };

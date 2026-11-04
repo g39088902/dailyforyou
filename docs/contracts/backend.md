@@ -142,9 +142,11 @@
       "stats": {
         "total": 424,
         "lastSuccessAt": "2026-10-20T08:21:36.530Z",
+        "lastItemAt": "2026-10-20T08:21:36.530Z",
         "stale": false,
         "status": "ok",
-        "consecutiveFailures": 0
+        "consecutiveFailures": 0,
+        "lastError": ""
       }
     }
   ]
@@ -154,7 +156,9 @@
 字段规则：
 
 - **`enabled`** = `enabled = 1 AND retired = 0 AND consecutive_failures < 5`。连续失败 5 次自动判不可用，但**不从清单里消失**——前端灰显而不是隐藏，让"某个源挂了"这件事可见。
-- **`stale`** = `now - last_success_at > 2 × CRAWL_INTERVAL_MINUTES`（默认 120 分钟，阈值 4 小时）。
+- **`stale`** = `now - last_success_at > 2 × CRAWL_INTERVAL_MINUTES`（默认 120 分钟，阈值 4 小时）。它只证明**链路活着**（本轮能抓到数据），不证明内容在更新：crawler 每轮都会把旧条目重新 upsert 命中，`last_success_at` 因此每 2 小时刷新一次，一个内容冻结三周的 feed 也会显示健康。
+- **`lastItemAt`** = `MAX(news_items.created_at)`，即这个信源**最近一次抓到新条目**的时间，空串表示从未有过内容。`created_at` 只在首次 INSERT 写入、冲突更新不覆盖，是唯一可靠的内容新鲜度信号。停更标记必须基于它，不能用 `lastSuccessAt`。
+- **停更阈值不在后端**：后端只下发绝对时间，24 小时（停更）/ 72 小时（长期停更）由前端 `utils/sourceHealth.js` 用当前时间现算。原因是本接口带 `ETag + max-age=60`，而 ETag 只在爬虫写库时变，下发算好的小时数会被冻结最长 2 小时。
 - **`status`**：读库时若 `status='running'` 且 `last_started_at` 超过 30 分钟，对外报 `stuck`（等价 `failed`）。这是防止进程被 kill 后残留的"永远抓取中"。
 - **`logo`**：`logo_url` 有值就用它，否则 `/logo/{key}.png`。**该字段永远非空**，因为 `/logo/{key}.png` 有兜底徽标。
 - **`ETag`** = `md5(MAX(updated_at) + COUNT(*))`。客户端带 `If-None-Match` 直接返回 `304`。清单一天最多变一次，没必要每次全量传。
@@ -249,16 +253,39 @@ echo "$health" | grep -q '"status":"ok"' || fail "服务降级：$health"
 ## 5. 数据接口保持兼容
 
 ```
-GET /{name}?type={subType}&limit=30
+GET /{name}?type={subType}&limit=30&maxAge=48
 ```
 
 语义不变：`source_name = name AND sub_type = params.type`。前端从清单拿到 `name` 和 `params` 直接拼，不再需要 `getHotLists` 的前缀白名单。
 
+**`maxAge`（小时）** 是可见窗口，默认取 `NEWS_MAX_AGE_HOURS`（48），`0` 表示不限（「查看更早内容」用它回退）。非法值或负数必须**回落到默认**，不能 clamp 成 `0`——那等于静默关闭整条策略。上限 8760。
+
+时间口径是 `news_items.created_at`（首次入库），不是上游 `pub_time`：后者是毫秒 epoch 字符串、存在 `""` 与 `"0"` 脏值，且 7 个信源完全没有该字段。
+
 响应补一个 `key` 字段，避免前端拿 `name` 回查时对不上子类型：
 
 ```jsonc
-{ "code": 200, "key": "reuters-world", "name": "reuters", "total": 30, "data": [...] }
+{
+  "code": 200,
+  "key": "reuters-world",
+  "name": "reuters",
+  "total": 30,                                   // 语义不变 = data.length
+  "maxAgeHours": 48,                             // 本次生效口径，0 = 不限
+  "hasOlder": false,                             // 窗口内为空但库里还有更早内容
+  "lastItemAt": "2026-10-20T08:21:36.530Z",      // 该信源最近一条内容的入库时间
+  "updateTime": "2026-10-20T08:21:36.530Z",      // = lastItemAt，缺失才回退 last_success_at
+  "data": [
+    { "id": 1, "title": "...", "timestamp": "1762000000000", "createdAt": "2026-10-20T08:21:36.530Z" }
+  ]
+}
 ```
+
+**时间窗的两个陷阱（改这段 SQL 前必读）**：
+
+1. `AND` 优先级高于 `OR`。现有查询是 `WHERE (A) OR (B)`（B 兼容 `source_name` 为空的历史行）。若在末尾直接追加 `AND created_at >= ?`，等价于 `A OR (B AND created_at)`——**A 分支完全不过滤**，过滤器整体失效。必须写成 `WHERE ((A) OR (B)) AND created_at >= ?`。
+2. `updateTime` 不能回退到 `last_success_at`。它是链路信号（每轮都刷新），会造成「页头显示 3 小时前更新、列表却全空」。窗口空时要回退到 `lastItemAt`，让用户看到真正的「最近一条内容在 N 天前」。
+
+**`hasOlder` 是必需的，不是可选优化**：48 小时窗口天然会产出 `200 + data: []`，正是 §6 明令禁止的「沉默失败」形态。前端靠它区分「今天真没新闻」和「这个频道已经停更」，并据此给出「查看更早内容」入口。实现上只在 `data.length === 0` 时补一次 `SELECT 1 ... AND created_at < ? LIMIT 1`，不要用 `items_total - data.length` 推导（会漏算历史行）。
 
 ---
 
@@ -268,6 +295,7 @@ GET /{name}?type={subType}&limit=30
 | :--- | :--- | :--- |
 | 未知信源 | `200 + data: []` | `404 { code: 404, message: "unknown source" }` |
 | 清单内但无数据 | `200 + data: []` | `200 + data: []`（正常，新源刚上线） |
+| 清单内但窗口内无内容 | — | `200 + data: [] + hasOlder: true + lastItemAt`，前端显示「近 48 小时无新增」并给出「查看更早内容」 |
 | 清单内但已 stale | `200 + data: []` 或旧数据 | `200` + `stale: true`，前端标记"数据可能滞后" |
 | `sources` 表不存在 | — | `/sources` 返回 `200 + initialized: false + sources: []`，不 500 |
 | 爬虫停摆 | 完全无感 | `/health` 报 `lagMinutes`，`/sources` 全量 `stale: true` |
@@ -300,4 +328,9 @@ GET /{name}?type={subType}&limit=30
 - [ ] `pm2 stop dailyhot-crawler` 后 5 分钟内 `/api/health` 变 `degraded`
 - [ ] 空库（无 `sources` 表）下 `/sources` 返回 `200 + initialized: false`，不 500
 - [ ] 未知信源返回 `404`，不再静默空数组
+- [ ] `curl /api/sources` 每条 `stats` 带 `lastItemAt`；停更源的 `lastItemAt` 明显早于 `lastSuccessAt`
+- [ ] `curl '/api/{name}'` 与 `curl '/api/{name}?maxAge=0'` 条数不同（相同说明 `OR` 括号没加，过滤器失效）
+- [ ] `curl '/api/{name}?maxAge=-1'` 与 `?maxAge=abc` 的 `maxAgeHours` 为 48，不是 0
+- [ ] 窗口内为空的频道返回 `hasOlder: true`，前端出现「查看更早内容」且点开能拿到历史条目
+- [ ] `news_items` 表不存在时 `/sources` 仍返回 200（`lastItemAt` 为空串），不 500
 - [ ] `backend/src` 下 grep 不到任何具体媒体名

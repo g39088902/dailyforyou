@@ -135,6 +135,24 @@
                 >
                   暂不可用
                 </n-tag>
+                <n-tag
+                  v-else-if="healthOf(element).level === 'dead'"
+                  size="tiny"
+                  type="error"
+                  :bordered="false"
+                  class="status-tag"
+                >
+                  {{ healthOf(element).label }}
+                </n-tag>
+                <n-tag
+                  v-else-if="healthOf(element).level === 'stale'"
+                  size="tiny"
+                  type="warning"
+                  :bordered="false"
+                  class="status-tag"
+                >
+                  {{ healthOf(element).label }}
+                </n-tag>
               </div>
             </div>
             <n-switch
@@ -169,11 +187,12 @@
 </template>
 
 <script setup>
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
 import { mainStore } from "@/store";
 import { resolveLogoUrl } from "@/api";
 import { useOsTheme } from "naive-ui";
+import { deriveSourceHealth } from "@/utils/sourceHealth";
 import draggable from "vuedraggable";
 
 const store = mainStore();
@@ -185,6 +204,20 @@ const {
   headerFixed,
   listFontSize,
 } = storeToRefs(store);
+
+// 信源健康度：这里也是低频信源被 48 小时窗口隐藏后，用户唯一能「看见它还在」的地方。
+// stats 可能来自旧版 localStorage 快照而缺少 lastItemAt，deriveSourceHealth 会退化成 unknown。
+const healthMap = computed(() => {
+  const map = {};
+  const now = Date.now();
+  for (const source of store.sources) {
+    map[source.key] = deriveSourceHealth(source.stats, now);
+  }
+  return map;
+});
+
+const healthOf = (element) =>
+  healthMap.value[element?.key] || { level: "unknown", label: "" };
 
 // 保持本地临时拖拽数组与 store.sources 同步
 const draggableSources = ref([...store.sources]);

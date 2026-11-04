@@ -146,8 +146,18 @@ const handleSourceQuery = async (c: any) => {
   const limitQuery = c.req.query("limit");
   const limit = limitQuery ? parseInt(limitQuery, 10) : 30;
 
+  // 可见窗口（小时）。不传 = 走 config.NEWS_MAX_AGE_HOURS；显式传 0 = 不限（「查看更早内容」）。
+  // 非法值必须回落到「未传」，不能 clamp 成 0 —— 那等于静默关闭整条时间窗策略。
+  const maxAgeQuery = c.req.query("maxAge");
+  const maxAgeNum =
+    maxAgeQuery === undefined || maxAgeQuery === "" ? NaN : Number(maxAgeQuery);
+  const maxAgeHours =
+    Number.isFinite(maxAgeNum) && maxAgeNum >= 0
+      ? Math.min(Math.floor(maxAgeNum), 8760)
+      : undefined;
+
   try {
-    const result = await queryNewsBySource(source, { subType, limit });
+    const result = await queryNewsBySource(source, { subType, limit, maxAgeHours });
     return c.json({
       code: 200,
       ...result,

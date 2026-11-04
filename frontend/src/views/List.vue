@@ -42,6 +42,13 @@
                   class="total"
                   v-html="listData.total"
                 />
+                <n-text
+                  v-if="listData.maxAgeHours > 0"
+                  :depth="3"
+                  class="window-hint"
+                >
+                  近 {{ listData.maxAgeHours }} 小时 ·
+                </n-text>
                 <n-text :depth="3" class="time" v-html="updateTime" />
               </div>
             </div>
@@ -62,56 +69,86 @@
         </template>
         <template v-else>
           <div class="all">
-            <n-list hoverable clickable style="width: 100%">
-              <n-list-item
-                v-for="(item, index) in listData.data.slice(
-                  pageNumber * 20 - 20,
-                  pageNumber * 20
-                )"
-                :key="item.id || index"
-                @click="jumpLink(item)"
-              >
-                <template #prefix>
-                  <n-text
-                    class="num"
-                    :class="
-                      index + 1 + (pageNumber - 1) * 20 === 1
-                        ? 'one'
-                        : index + 1 + (pageNumber - 1) * 20 === 2
-                        ? 'two'
-                        : index + 1 + (pageNumber - 1) * 20 === 3
-                        ? 'three'
-                        : null
-                    "
-                    :depth="2"
+            <!-- 时间窗内没有内容时不能只渲染空列表：页头还挂着上次更新时间，看着像坏页面 -->
+            <n-empty
+              v-if="listData.data.length === 0"
+              class="list-empty"
+              :description="listEmptyText"
+            >
+              <template #extra>
+                <n-space justify="center">
+                  <n-button
+                    v-if="!showAllHistory && listData.hasOlder"
+                    size="small"
+                    type="primary"
+                    :loading="loadingOlder"
+                    @click="loadOlder"
                   >
-                    {{ index + 1 + (pageNumber - 1) * 20 }}
-                  </n-text>
-                </template>
-                <div class="text">
-                  <n-text class="title" v-html="item.title" />
-                  <n-text
-                    v-if="item.desc"
-                    class="desc"
-                    :depth="3"
-                    v-html="item.desc"
-                  />
-                </div>
-                <div class="message">
-                  <div class="hot" v-if="item.hot">
-                    <n-icon :depth="3" :component="Fire" />
-                    <n-text class="hot-text" :depth="3" v-html="item.hot" />
+                    查看更早内容
+                  </n-button>
+                  <n-button
+                    size="small"
+                    secondary
+                    strong
+                    @click="router.push('/setting')"
+                  >
+                    检查信源状态
+                  </n-button>
+                </n-space>
+              </template>
+            </n-empty>
+            <template v-else>
+              <n-list hoverable clickable style="width: 100%">
+                <n-list-item
+                  v-for="(item, index) in listData.data.slice(
+                    pageNumber * 20 - 20,
+                    pageNumber * 20
+                  )"
+                  :key="item.id || index"
+                  @click="jumpLink(item)"
+                >
+                  <template #prefix>
+                    <n-text
+                      class="num"
+                      :class="
+                        index + 1 + (pageNumber - 1) * 20 === 1
+                          ? 'one'
+                          : index + 1 + (pageNumber - 1) * 20 === 2
+                          ? 'two'
+                          : index + 1 + (pageNumber - 1) * 20 === 3
+                          ? 'three'
+                          : null
+                      "
+                      :depth="2"
+                    >
+                      {{ index + 1 + (pageNumber - 1) * 20 }}
+                    </n-text>
+                  </template>
+                  <div class="text">
+                    <n-text class="title" v-html="item.title" />
+                    <n-text
+                      v-if="item.desc"
+                      class="desc"
+                      :depth="3"
+                      v-html="item.desc"
+                    />
                   </div>
-                </div>
-              </n-list-item>
-            </n-list>
-            <n-pagination
-              class="pagination"
-              :page-slot="5"
-              :item-count="listData.data.length"
-              :page-sizes="[20]"
-              v-model:page="pageNumber"
-            />
+                  <div class="message">
+                    <div class="hot" v-if="item.hot">
+                      <n-icon :depth="3" :component="Fire" />
+                      <n-text class="hot-text" :depth="3" v-html="item.hot" />
+                    </div>
+                  </div>
+                </n-list-item>
+              </n-list>
+              <n-pagination
+                class="pagination"
+                :page-slot="5"
+                :item-count="listData.data.length"
+                :page-sizes="[20]"
+                v-model:page="pageNumber"
+              />
+            </template>
           </div>
         </template>
       </Transition>
@@ -152,8 +189,11 @@ const pageNumber = ref(
 );
 const listData = ref(null);
 const updateTime = ref(null);
+const loadingOlder = ref(false);
+// 是否正在展示被时间窗隐藏的历史内容（点过「查看更早内容」）
+const showAllHistory = ref(false);
 
-const getHotListsData = async (sourceKey, isNew = false) => {
+const loadSource = async (sourceKey, { isNew = false, maxAge } = {}) => {
   listData.value = null;
   const item = store.sources.find((s) => s.key === sourceKey);
   if (!item) {
@@ -163,9 +203,14 @@ const getHotListsData = async (sourceKey, isNew = false) => {
     return;
   }
   try {
-    const res = await getHotLists(item, isNew);
+    const res = await getHotLists(
+      item,
+      isNew,
+      maxAge === undefined ? undefined : { maxAge }
+    );
     if (res && res.code === 200) {
       listData.value = res;
+      showAllHistory.value = maxAge === 0;
       updateTime.value = formatTime(res.updateTime);
     } else if (res && res.code === 404) {
       store.removeOfflineSource(item.key);
@@ -179,6 +224,26 @@ const getHotListsData = async (sourceKey, isNew = false) => {
     } else {
       window.$message?.error("读取信源失败，请稍后重试");
     }
+  }
+};
+
+const listEmptyText = computed(() => {
+  const data = listData.value;
+  if (!showAllHistory.value && data?.hasOlder) {
+    return `近 ${data.maxAgeHours} 小时没有新内容`;
+  }
+  if (!showAllHistory.value && data?.maxAgeHours > 0) {
+    return `近 ${data.maxAgeHours} 小时没有新内容，该信源可能已停更`;
+  }
+  return "这个信源还没有任何内容";
+});
+
+const loadOlder = async () => {
+  loadingOlder.value = true;
+  try {
+    await loadSource(currentSourceKey.value, { isNew: true, maxAge: 0 });
+  } finally {
+    loadingOlder.value = false;
   }
 };
 
@@ -232,7 +297,7 @@ watch(
     if (val.name === "list") {
       currentSourceKey.value = val.query.type;
       pageNumber.value = Number(val.query.page || 1);
-      getHotListsData(currentSourceKey.value);
+      loadSource(currentSourceKey.value);
     }
   }
 );
@@ -245,7 +310,7 @@ onMounted(async () => {
     currentSourceKey.value = visibleSources.value[0]?.key || store.sources[0]?.key || "";
   }
   if (currentSourceKey.value) {
-    getHotListsData(currentSourceKey.value);
+    loadSource(currentSourceKey.value);
   }
 });
 </script>
@@ -327,6 +392,9 @@ onMounted(async () => {
             margin-right: 6px;
           }
         }
+        .window-hint {
+          margin-right: 6px;
+        }
       }
       @media (max-width: 740px) {
         display: flex;
@@ -355,6 +423,9 @@ onMounted(async () => {
       display: flex;
       flex-direction: column;
       align-items: center;
+      .list-empty {
+        padding: 60px 0;
+      }
       .num {
         width: 24px;
         height: 24px;
