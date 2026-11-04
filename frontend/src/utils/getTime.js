@@ -75,6 +75,70 @@ export const formatNewsAge = (timestamp, nowMs = Date.now()) => {
   return `${date.getMonth() + 1} 月 ${date.getDate()} 日`;
 };
 
+/**
+ * 格式化为精确时间 (YYYY-MM-DD HH:mm:ss)，用于 hover tooltip
+ */
+export const formatExactTime = (timestamp) => {
+  const ms = parseTs(timestamp);
+  if (!ms) return "";
+  const d = new Date(ms);
+  const pad = (n) => String(n).padStart(2, "0");
+  const y = d.getFullYear();
+  const m = pad(d.getMonth() + 1);
+  const date = pad(d.getDate());
+  const h = pad(d.getHours());
+  const min = pad(d.getMinutes());
+  const s = pad(d.getSeconds());
+  return `${y}-${m}-${date} ${h}:${min}:${s}`;
+};
+
+/**
+ * 提取条目的发布时间与爬取时间（兼顾展示「新闻发布时间」和「系统爬取时间」）
+ *
+ * 字段映射与容错：
+ * - 发布时间（pubTime）：源站标记的文章发布时间。缺失、为 "0" 或解析失败则为空。
+ * - 爬取时间（crawlTime）：news_items.created_at（首次入库时间）。若缺失则兜底 item.timestamp。
+ * - 兼容逻辑：若未直接下发 pubTime，而 item.timestamp 存在且与 createdAt 明显不同（> 2 秒），
+ *   说明 timestamp 来自上游 pub_time。
+ */
+export const getItemTimeMeta = (item, nowMs = Date.now()) => {
+  if (!item) {
+    return {
+      pubTimeMs: 0,
+      crawlTimeMs: 0,
+      pubAgeText: "",
+      crawlAgeText: "",
+      pubExactTime: "",
+      crawlExactTime: "",
+    };
+  }
+
+  const crawlMs = parseTs(item.createdAt) || parseTs(item.timestamp);
+  let pubMs = parseTs(item.pubTime);
+
+  // 兼容未显式下发 pubTime 但存在独立 timestamp 的场景
+  if (!pubMs && item.timestamp) {
+    const tsMs = parseTs(item.timestamp);
+    if (tsMs && (!crawlMs || Math.abs(tsMs - crawlMs) > 2000)) {
+      pubMs = tsMs;
+    }
+  }
+
+  const pubAgeText = pubMs ? formatNewsAge(pubMs, nowMs) : "";
+  const crawlAgeText = crawlMs ? formatNewsAge(crawlMs, nowMs) : "";
+  const pubExactTime = pubMs ? formatExactTime(pubMs) : "";
+  const crawlExactTime = crawlMs ? formatExactTime(crawlMs) : "";
+
+  return {
+    pubTimeMs: pubMs,
+    crawlTimeMs: crawlMs,
+    pubAgeText,
+    crawlAgeText,
+    pubExactTime,
+    crawlExactTime,
+  };
+};
+
 export const getCurrentTime = () => {
   const time = new Date();
   const year = time.getFullYear();

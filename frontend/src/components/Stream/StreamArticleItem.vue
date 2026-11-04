@@ -46,8 +46,28 @@
           <n-text class="hot-text" :depth="3" v-html="item.hot" />
         </div>
 
-        <!-- 内容时间：让「新旧」可直接感知，也是 48 小时窗口的可见依据 -->
-        <n-text v-if="ageText" :depth="3" class="news-age">{{ ageText }}</n-text>
+        <!-- 内容时间：既显示新闻发布时间，也显示系统爬取时间 -->
+        <div
+          v-if="timeMeta.pubAgeText || timeMeta.crawlAgeText"
+          class="time-meta-group"
+        >
+          <span
+            v-if="timeMeta.pubAgeText"
+            class="time-badge pub-time"
+            :title="`新闻发布时间：${timeMeta.pubExactTime}`"
+          >
+            <span class="time-label">发布</span>
+            <span class="time-val">{{ timeMeta.pubAgeText }}</span>
+          </span>
+          <span
+            v-if="timeMeta.crawlAgeText"
+            class="time-badge crawl-time"
+            :title="`系统爬取时间：${timeMeta.crawlExactTime}`"
+          >
+            <span class="time-label">爬取</span>
+            <span class="time-val">{{ timeMeta.crawlAgeText }}</span>
+          </span>
+        </div>
 
         <!-- AI 评分徽章 -->
         <stream-score-badge
@@ -98,7 +118,7 @@
 import { computed } from "vue";
 import { Fire } from "@icon-park/vue-next";
 import { resolveLogoUrl } from "@/api";
-import { formatNewsAge } from "@/utils/getTime";
+import { getItemTimeMeta } from "@/utils/getTime";
 import StreamScoreBadge from "./StreamScoreBadge.vue";
 
 const props = defineProps({
@@ -123,14 +143,10 @@ const props = defineProps({
 
 defineEmits(["click", "filter-source", "toggle-read", "commit-score"]);
 
-// timestamp = pub_time || created_at：前者可能是 "0"（适配器解析失败）或毫秒 epoch 字符串，
-// 后者一定是 ISO。前者不可用时回退到入库时间，两者都不可用就不渲染。
-const ageText = computed(() => {
+// 提取并兼顾展示新闻发布时间与爬取时间
+const timeMeta = computed(() => {
   const now = props.nowMs || Date.now();
-  return (
-    formatNewsAge(props.item.timestamp, now) ||
-    formatNewsAge(props.item.createdAt, now)
-  );
+  return getItemTimeMeta(props.item, now);
 });
 </script>
 
@@ -211,10 +227,57 @@ const ageText = computed(() => {
         }
       }
 
-      .news-age {
-        font-size: 12px;
+      .time-meta-group {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
         white-space: nowrap;
-        opacity: 0.75;
+
+        .time-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 3px;
+          height: 20px;
+          line-height: 20px;
+          padding: 0 6px;
+          border-radius: 6px;
+          font-size: 11px;
+          cursor: default;
+          white-space: nowrap;
+          user-select: none;
+          transition: all 0.2s;
+
+          .time-label {
+            font-weight: 500;
+            opacity: 0.8;
+          }
+
+          .time-val {
+            font-weight: normal;
+          }
+
+          &.pub-time {
+            background: rgba(24, 160, 88, 0.08);
+            color: var(--n-color-primary, #18a058);
+
+            .time-label {
+              color: var(--n-color-primary, #18a058);
+            }
+          }
+
+          &.crawl-time {
+            background: rgba(128, 128, 128, 0.1);
+            color: var(--n-text-color-3, #8c8c8c);
+
+            .time-label {
+              color: var(--n-text-color-3, #8c8c8c);
+            }
+          }
+
+          &:hover {
+            filter: brightness(0.95);
+          }
+        }
       }
 
       .read-status-tag {

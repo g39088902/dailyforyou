@@ -138,6 +138,28 @@
                       <n-icon :depth="3" :component="Fire" />
                       <n-text class="hot-text" :depth="3" v-html="item.hot" />
                     </div>
+                    <!-- 时间信息：既显示新闻发布时间，也显示系统爬取时间 -->
+                    <div
+                      v-if="getTimeMeta(item).pubAgeText || getTimeMeta(item).crawlAgeText"
+                      class="time-meta-group"
+                    >
+                      <span
+                        v-if="getTimeMeta(item).pubAgeText"
+                        class="time-badge pub-time"
+                        :title="`新闻发布时间：${getTimeMeta(item).pubExactTime}`"
+                      >
+                        <span class="time-label">发布</span>
+                        <span class="time-val">{{ getTimeMeta(item).pubAgeText }}</span>
+                      </span>
+                      <span
+                        v-if="getTimeMeta(item).crawlAgeText"
+                        class="time-badge crawl-time"
+                        :title="`系统爬取时间：${getTimeMeta(item).crawlExactTime}`"
+                      >
+                        <span class="time-label">爬取</span>
+                        <span class="time-val">{{ getTimeMeta(item).crawlAgeText }}</span>
+                      </span>
+                    </div>
                   </div>
                 </n-list-item>
               </n-list>
@@ -157,11 +179,11 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { Fire } from "@icon-park/vue-next";
 import { mainStore } from "@/store";
 import { useRouter } from "vue-router";
-import { formatTime } from "@/utils/getTime";
+import { formatTime, getItemTimeMeta } from "@/utils/getTime";
 import { getHotLists, resolveLogoUrl } from "@/api";
 
 const router = useRouter();
@@ -189,6 +211,9 @@ const pageNumber = ref(
 );
 const listData = ref(null);
 const updateTime = ref(null);
+const nowMs = ref(Date.now());
+let nowTimer = null;
+const getTimeMeta = (item) => getItemTimeMeta(item, nowMs.value);
 const loadingOlder = ref(false);
 // 是否正在展示被时间窗隐藏的历史内容（点过「查看更早内容」）
 const showAllHistory = ref(false);
@@ -303,6 +328,10 @@ watch(
 );
 
 onMounted(async () => {
+  nowTimer = setInterval(() => {
+    nowMs.value = Date.now();
+  }, 60_000);
+
   if (store.sources.length === 0) {
     await store.loadSources();
   }
@@ -311,6 +340,13 @@ onMounted(async () => {
   }
   if (currentSourceKey.value) {
     loadSource(currentSourceKey.value);
+  }
+});
+
+onBeforeUnmount(() => {
+  if (nowTimer) {
+    clearInterval(nowTimer);
+    nowTimer = null;
   }
 });
 </script>
@@ -472,7 +508,10 @@ onMounted(async () => {
       .message {
         display: flex;
         align-items: center;
+        gap: 12px;
         margin-top: 12px;
+        flex-wrap: wrap;
+
         .hot {
           display: flex;
           align-items: center;
@@ -480,6 +519,59 @@ onMounted(async () => {
           .hot-text {
             margin-left: 4px;
             line-height: 0;
+          }
+        }
+
+        .time-meta-group {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          white-space: nowrap;
+
+          .time-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            height: 20px;
+            line-height: 20px;
+            padding: 0 6px;
+            border-radius: 6px;
+            font-size: 11px;
+            cursor: default;
+            white-space: nowrap;
+            user-select: none;
+            transition: all 0.2s;
+
+            .time-label {
+              font-weight: 500;
+              opacity: 0.8;
+            }
+
+            .time-val {
+              font-weight: normal;
+            }
+
+            &.pub-time {
+              background: rgba(24, 160, 88, 0.08);
+              color: var(--n-color-primary, #18a058);
+
+              .time-label {
+                color: var(--n-color-primary, #18a058);
+              }
+            }
+
+            &.crawl-time {
+              background: rgba(128, 128, 128, 0.1);
+              color: var(--n-text-color-3, #8c8c8c);
+
+              .time-label {
+                color: var(--n-text-color-3, #8c8c8c);
+              }
+            }
+
+            &:hover {
+              filter: brightness(0.95);
+            }
           }
         }
       }

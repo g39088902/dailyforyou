@@ -275,7 +275,7 @@ GET /{name}?type={subType}&limit=30&maxAge=48
   "lastItemAt": "2026-10-20T08:21:36.530Z",      // 该信源最近一条内容的入库时间
   "updateTime": "2026-10-20T08:21:36.530Z",      // = lastItemAt，缺失才回退 last_success_at
   "data": [
-    { "id": 1, "title": "...", "timestamp": "1762000000000", "createdAt": "2026-10-20T08:21:36.530Z" }
+    { "id": 1, "title": "...", "timestamp": "1762000000000", "pubTime": "1762000000000", "createdAt": "2026-10-20T08:21:36.530Z" }
   ]
 }
 ```

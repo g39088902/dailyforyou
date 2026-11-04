@@ -598,6 +598,8 @@ export interface NewsItemResult {
   url: string;
   mobileUrl: string;
   timestamp?: string;
+  /** 上游新闻发布时间（若源站提供，未提供为空或 undefined） */
+  pubTime?: string;
   /** 首次入库时间（ISO），用于展示内容新旧 */
   createdAt: string;
 }
@@ -735,6 +737,7 @@ export const queryNewsBySource = async (
     url: r.url,
     mobileUrl: r.mobile_url || r.url,
     timestamp: r.pub_time || r.created_at,
+    pubTime: r.pub_time && r.pub_time !== "0" ? String(r.pub_time) : undefined,
     createdAt: String(r.created_at || ""),
   }));
 
